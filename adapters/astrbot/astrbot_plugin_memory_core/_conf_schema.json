@@ -1,0 +1,74 @@
+{
+  "soul_dir": {
+    "description": "Memory directory",
+    "type": "string",
+    "default": "",
+    "hint": "Where this being's memory lives (soul.db, config.toml, identity/). Empty = data/plugin_data/astrbot_plugin_memory_core/soul. Embedding settings go into config.toml inside it."
+  },
+  "owner_ids": {
+    "description": "Owner user IDs",
+    "type": "list",
+    "default": [],
+    "hint": "Sender IDs of the owner. Private chats with them get the 'owner' scope; their content is never brought up elsewhere."
+  },
+  "owner_name": {
+    "description": "How the being refers to its owner",
+    "type": "string",
+    "default": "主人",
+    "hint": "All owner accounts (on any platform) are one person with this name."
+  },
+  "self_name": {
+    "description": "How the being refers to itself in memories",
+    "type": "string",
+    "default": "我"
+  },
+  "skip_prefixes": {
+    "description": "Do not record messages starting with",
+    "type": "list",
+    "default": ["/"],
+    "hint": "Commands are not experiences."
+  },
+  "record_messages": {
+    "description": "Record messages",
+    "type": "bool",
+    "default": true
+  },
+  "record_group_messages": {
+    "description": "Record group messages",
+    "type": "bool",
+    "default": true,
+    "hint": "Only groups that pass AstrBot's whitelist ever reach this plugin."
+  },
+  "inject_memories": {
+    "description": "Inject recalled memories before each reply",
+    "type": "bool",
+    "default": true
+  },
+  "inject_top_k": {
+    "description": "Memories to inject",
+    "type": "int",
+    "default": 6
+  },
+  "inject_max_chars": {
+    "description": "Max characters of injected memories",
+    "type": "int",
+    "default": 1200
+  },
+  "llm_provider_id": {
+    "description": "Chat provider used for consolidation",
+    "type": "string",
+    "default": "",
+    "hint": "Empty = the current default chat provider. A cheap, fast model is enough."
+  },
+  "consolidate_interval_minutes": {
+    "description": "Consolidation interval (minutes)",
+    "type": "int",
+    "default": 30,
+    "hint": "0 disables automatic consolidation (use /mem_consolidate)."
+  },
+  "consolidate_min_new": {
+    "description": "Minimum new messages per chat before consolidating it",
+    "type": "int",
+    "default": 10
+  }
+}

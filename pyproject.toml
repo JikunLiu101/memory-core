@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "memory-core"
+version = "0.1.0"
+description = "A local-first, framework-agnostic long-term memory core for AI companions: raw experiences are the source of truth, vectors are a rebuildable index."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "JikunLiu101" }]
+keywords = ["memory", "llm", "agent", "companion", "rag", "mcp"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+# Better Chinese word segmentation for full-text search (falls back to character n-grams without it).
+zh = ["jieba>=0.42"]
+dev = ["pytest>=8"]
+
+[project.urls]
+Repository = "https://github.com/JikunLiu101/memory-core"
+
+[project.scripts]
+memory-core = "memory_core.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memory_core"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
