@@ -40,3 +40,24 @@ def test_memory_block():
     block = logic.memory_block(["阿明不吃香菜", "主人怕蛇"])
     assert block.startswith("<long_term_memory>") and "- 阿明不吃香菜" in block
     assert logic.memory_block(["x" * 50] * 10, max_chars=120).count("\n- ") <= 2
+
+
+def test_identity_block_skips_empty_documents():
+    docs = [("identity", "# who\nme\n"), ("self_image", None), ("voice_examples", "  ")]
+    assert logic.identity_block(docs, guide="") == "<identity>\n# who\nme\n</identity>"
+    assert logic.identity_block(docs).endswith("</how_your_memory_works>")
+    assert logic.identity_block([]) == ""
+
+
+def test_strip_framework_persona():
+    system = "head\n# Persona Instructions\n\nYou are a helpful assistant.\n\nDEFAULT\ntail"
+    out = logic.strip_framework_persona(system, "You are a helpful assistant.", ["DEFAULT"])
+    assert "helpful" not in out and "DEFAULT" not in out
+    assert out.startswith("head") and out.endswith("tail")
+    assert logic.strip_framework_persona("unchanged", None) == "unchanged"
+
+
+def test_speaker_note():
+    assert "主人本人" in logic.speaker_note(True, "主人", "x", False)
+    note = logic.speaker_note(False, "主人", "阿明", True)
+    assert "阿明" in note and "不是主人" in note and "群聊" in note

@@ -17,6 +17,12 @@
     "default": "主人",
     "hint": "All owner accounts (on any platform) are one person with this name."
   },
+  "owner_title": {
+    "description": "What the being calls its owner",
+    "type": "string",
+    "default": "",
+    "hint": "Used in prompts (diary, speaker line), e.g. 爸爸 or 主人. Empty = owner_name."
+  },
   "self_name": {
     "description": "How the being refers to itself in memories",
     "type": "string",
@@ -38,6 +44,18 @@
     "type": "bool",
     "default": true,
     "hint": "Only groups that pass AstrBot's whitelist ever reach this plugin."
+  },
+  "inject_identity": {
+    "description": "Use the being's identity documents as its persona",
+    "type": "bool",
+    "default": true,
+    "hint": "identity/self.md (core identity), self-image.md and voice.md in the memory directory go first in the system prompt, plus a line saying whether the speaker is the owner. Edits apply on the next reply."
+  },
+  "replace_framework_persona": {
+    "description": "Remove AstrBot's own persona text",
+    "type": "bool",
+    "default": true,
+    "hint": "Only when an identity document exists. Keeps two personas from contradicting each other."
   },
   "inject_memories": {
     "description": "Inject recalled memories before each reply",
@@ -70,5 +88,27 @@
     "description": "Minimum new messages per chat before consolidating it",
     "type": "int",
     "default": 10
+  },
+  "diary_enabled": {
+    "description": "Write a diary every day",
+    "type": "bool",
+    "default": true,
+    "hint": "After diary_hour, the being writes the previous day's diary (owner-only memory, also saved as diary/<date>.md) and rewrites identity/self-image.md. /mem_diary writes today's now."
+  },
+  "diary_hour": {
+    "description": "Hour a 'day' starts (0-23, local time)",
+    "type": "int",
+    "default": 4,
+    "hint": "Late-night chats before this hour belong to the previous day."
+  },
+  "diary_quiet_days": {
+    "description": "Also write on days when nothing happened",
+    "type": "bool",
+    "default": true
+  },
+  "self_image_days": {
+    "description": "Diaries considered when rewriting the self-image",
+    "type": "int",
+    "default": 7
   }
 }

@@ -102,6 +102,27 @@ proposes, code decides: it can never widen visibility — memories about people 
 (or `owner`), only memories about no person can become `public`. A place's cursor only advances after its batch
 was applied, so a failed call loses nothing.
 
+## Diary and self-image
+
+A being grows a sense of itself from what it lived (`memory_core.reflect`):
+
+```python
+from memory_core.reflect import day_window, update_self_image, write_diary
+
+start, end = day_window(day, boundary_hour=4)        # late nights belong to the day before
+write_diary(core, llm, day, start, end, persona=identity_text, owner_spaces=[...], owner_title="Dad")
+update_self_image(core, llm, day, persona=identity_text)
+```
+
+* **Diary**: one first-person entry per day from that day's episodes (a `diary` memory with the `owner` scope,
+  also written to `diary/<date>.md` for reading). Idempotent; `force=True` rewrites it (the old one is
+  superseded).
+* **Self-image**: `identity/self-image.md`, a short "how I see myself" rewritten from the recent diaries. It is
+  the being's own layer: it must not contradict the core identity (`identity/self.md`, which only the owner
+  edits) and carries no private details of anyone. Previous versions are kept in `identity/history/`.
+
+The prompts are Chinese for now; the model answers in the language of its persona and experiences.
+
 ## MCP server
 
 Any MCP client (Claude Code, DeepSeek Harness, Codex CLI, ...) can share the same memory:
@@ -121,8 +142,9 @@ what is visible there.
 ## Adapters
 
 * **AstrBot** — [`adapters/astrbot`](adapters/astrbot/README.md): records every visible message and the bot's own
-  answers, injects recalled memories before each reply, consolidates periodically with AstrBot's own chat model,
-  and gives the model `memory_recall` / `memory_remember` tools.
+  answers, uses the identity documents as the persona, injects recalled memories before each reply,
+  consolidates periodically with AstrBot's own chat model, writes the daily diary and self-image, and gives the
+  model `memory_recall` / `memory_remember` tools.
 
 ## Roadmap
 
@@ -130,7 +152,7 @@ what is visible there.
 |---|---|
 | M0 ✅ | Storage, append-only episodes, hybrid recall (full-text + vectors + entities), scopes, soul bundle, tests |
 | M1 ✅ | Consolidation (add / update / supersede, entity aliases), MCP server, AstrBot adapter |
-| M2 | Reflection (diary, `now.md`), decay and archiving, hard forget along provenance, write gates & proposals |
+| M2 🔄 | ✅ Diary and self-image (0.2.0) · Decay and archiving, hard forget along provenance, write gates & proposals |
 | M3 | Public benchmarks (LoCoMo, LongMemEval), docs |
 | M4 | Experience collectors: browser, video sites |
 | M5 | Lexicon (slang/meme) learning, style learning, identity proposals with rollback, inner monologue |

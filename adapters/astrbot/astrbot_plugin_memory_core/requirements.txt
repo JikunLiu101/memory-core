@@ -1,1 +1,1 @@
-memory-core @ git+https://github.com/JikunLiu101/memory-core@v0.1.0
+memory-core @ git+https://github.com/JikunLiu101/memory-core@v0.2.0

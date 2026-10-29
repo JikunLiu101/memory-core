@@ -1,8 +1,10 @@
 """AstrBot adapter for memory-core.
 
+- uses the being's identity documents (identity/*.md) as its persona
 - records every message it can see (and its own replies) as episodes
 - recalls relevant memories before each model call and injects them
 - periodically consolidates episodes into memories with AstrBot's own chat model
+- writes a diary every day and refreshes the being's self-image from it
 - gives the model `memory_recall` / `memory_remember` tools
 """
 
@@ -10,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import timedelta
 from pathlib import Path
 
 from astrbot.api import logger, star
@@ -18,18 +21,30 @@ from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.core.agent.message import TextPart
 
 from memory_core import Audience, Episode, Memory, MemoryCore
+from memory_core import timeutil
+from memory_core.reflect import current_day, day_window, diary_for, update_self_image, write_diary
 
 from .logic import (
+    IDENTITY_DOCS,
     OWNER_ALIAS,
     SELF_ALIAS,
     actor_alias,
     default_scope,
+    identity_block,
     is_command,
     is_owner_private,
     memory_block,
+    memory_guide,
     owner_spaces,
     space_of,
+    speaker_note,
+    strip_framework_persona,
 )
+
+try:  # the persona AstrBot's web chat uses when none is selected
+    from astrbot.core.astr_main_agent_resources import CHATUI_SPECIAL_DEFAULT_PERSONA_PROMPT as _WEBCHAT_DEFAULT
+except Exception:  # noqa: BLE001 - internal name, may move between AstrBot versions
+    _WEBCHAT_DEFAULT = ""
 
 PLUGIN_NAME = "astrbot_plugin_memory_core"
 
@@ -58,9 +73,13 @@ class MemoryCorePlugin(star.Star):
         self.root = Path(root) if root else Path(star.StarTools.get_data_dir(PLUGIN_NAME)) / "soul"
         self.owner_ids = [str(x) for x in self.cfg.get("owner_ids", []) if str(x).strip()]
         self.owner_name = (self.cfg.get("owner_name") or "主人").strip()
+        # what the being calls its owner in prompts (e.g. 爸爸); defaults to owner_name
+        self.owner_title = (self.cfg.get("owner_title") or "").strip() or self.owner_name
         self.core: MemoryCore | None = None
         self._task: asyncio.Task | None = None
+        self._diary_task: asyncio.Task | None = None
         self._consolidating = asyncio.Lock()
+        self._reflecting = asyncio.Lock()
         self._known_names: dict[str, str] = {}
 
     # ---------------------------------------------------------------- lifecycle
@@ -78,10 +97,13 @@ class MemoryCorePlugin(star.Star):
             logger.warning("[memory-core] owner_ids is empty: no conversation is treated as the owner's")
         if int(self.cfg.get("consolidate_interval_minutes", 30)) > 0:
             self._task = asyncio.create_task(self._consolidate_loop())
+        if self.cfg.get("diary_enabled", True):
+            self._diary_task = asyncio.create_task(self._diary_loop())
 
     async def terminate(self) -> None:
-        if self._task:
-            self._task.cancel()
+        for task in (self._task, self._diary_task):
+            if task:
+                task.cancel()
         if self.core:
             await asyncio.to_thread(self.core.close)
 
@@ -151,10 +173,44 @@ class MemoryCorePlugin(star.Star):
 
     # ---------------------------------------------------------------- recall
 
+    def _framework_persona_prompt(self, event: AstrMessageEvent) -> str | None:
+        persona_id = event.get_extra("_trace_persona_id")
+        if not persona_id:
+            return None
+        try:
+            for item in self.context.persona_manager.personas_v3:
+                if item.get("name") == persona_id:
+                    return item.get("prompt") or None
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[memory-core] cannot read AstrBot personas: {exc}")
+        return None
+
+    def _apply_identity(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
+        """The being's identity documents go first in the system prompt (stable, so cached);
+        who is speaking goes last (it changes per sender)."""
+        docs = [(tag, self.core.identity(name)) for name, tag in IDENTITY_DOCS]
+        block = identity_block(docs, guide=memory_guide(self.owner_title))
+        if not block:
+            return
+        system = req.system_prompt or ""
+        if self.cfg.get("replace_framework_persona", True):
+            system = strip_framework_persona(system, self._framework_persona_prompt(event), (_WEBCHAT_DEFAULT,))
+        sender = str(event.get_sender_id())
+        note = speaker_note(sender in self.owner_ids, self.owner_title, (event.get_sender_name() or "").strip(),
+                            bool(event.get_group_id()))
+        req.system_prompt = f"{block}\n\n{system.strip()}\n\n{note}\n"
+
     @filter.on_llm_request()
     async def inject(self, event: AstrMessageEvent, req: ProviderRequest):
-        """Put relevant memories next to the user's message (keeps the system prompt cache-friendly)."""
-        if self.core is None or not self.cfg.get("inject_memories", True):
+        """Identity into the system prompt; relevant memories next to the user's message."""
+        if self.core is None:
+            return
+        if self.cfg.get("inject_identity", True):
+            try:
+                await asyncio.to_thread(self._apply_identity, event, req)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[memory-core] identity injection failed: {exc}")
+        if not self.cfg.get("inject_memories", True):
             return
         query = (req.prompt or event.get_message_str() or "").strip()
         if not query:
@@ -243,7 +299,71 @@ class MemoryCorePlugin(star.Star):
             except Exception as exc:
                 logger.warning(f"[memory-core] consolidation failed (will retry next round): {exc}")
 
+    # ---------------------------------------------------------------- diary and self-image
+
+    def _persona(self, *names: str) -> str:
+        tags = dict(IDENTITY_DOCS)
+        return identity_block([(tags[n], self.core.identity(n)) for n in names], guide="")
+
+    async def reflect_day(self, day, *, force: bool = False) -> tuple[str | None, str | None]:
+        """Write the diary of `day`, then refresh the self-image. Returns (diary text, self-image)."""
+        provider_id = self._provider_id()
+        if not provider_id:
+            raise RuntimeError("no chat provider available for the diary")
+        llm = AstrBotLLM(self.context, provider_id, asyncio.get_running_loop())
+        hour = int(self.cfg.get("diary_hour", 4))
+        start, end = day_window(day, hour)
+        async with self._reflecting:
+            def run():
+                if not self.core.episodes(until=end, limit=1):
+                    return None, None  # not born yet that day
+                spaces = self.core.store.space_heads().keys()
+                result = write_diary(self.core, llm, day, start, end,
+                                     persona=self._persona("self", "self-image", "voice"),
+                                     owner_spaces=owner_spaces(spaces, self.owner_ids),
+                                     write_quiet_days=bool(self.cfg.get("diary_quiet_days", True)), force=force,
+                                     owner_title=self.owner_title)
+                if result.memory is None or result.skipped:
+                    return (result.memory.text if result.memory else None), None
+                image = update_self_image(self.core, llm, day, persona=self._persona("self", "voice"),
+                                          days=int(self.cfg.get("self_image_days", 7)),
+                                          owner_title=self.owner_title)
+                return result.memory.text, image
+            diary, image = await asyncio.to_thread(run)
+        if diary:
+            logger.info(f"[memory-core] diary for {day} ready; self-image {'updated' if image else 'unchanged'}")
+        return diary, image
+
+    async def _diary_loop(self) -> None:
+        hour = int(self.cfg.get("diary_hour", 4))
+        while True:
+            try:
+                yesterday = current_day(timeutil.now(), hour) - timedelta(days=1)  # a finished day
+                if await asyncio.to_thread(diary_for, self.core, yesterday) is None:
+                    await self.reflect_day(yesterday)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(f"[memory-core] diary failed (will retry later): {exc}")
+            await asyncio.sleep(600)
+
     # ---------------------------------------------------------------- admin commands
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("mem_diary")
+    async def cmd_diary(self, event: AstrMessageEvent):
+        """让她现在就写今天的日记（会覆盖今天已写的）"""
+        day = current_day(timeutil.now(), int(self.cfg.get("diary_hour", 4)))
+        try:
+            diary, image = await self.reflect_day(day, force=True)
+        except Exception as exc:
+            yield event.plain_result(f"写日记失败：{exc}")
+            return
+        if not diary:
+            yield event.plain_result("今天还没有经历，没写日记")
+            return
+        tail = f"\n\n——我眼中的自己（已更新）——\n{image}" if image else ""
+        yield event.plain_result(f"【{day.isoformat()} 的日记】\n{diary}{tail}")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("mem_status")
