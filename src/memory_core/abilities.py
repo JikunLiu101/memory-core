@@ -112,6 +112,8 @@ def abilities_block(current: Iterable[Ability], noticed: Noticed | None = None, 
         lines.append(f"- 刚发现不能再{a.name}了：别再答应这件事")
     lines.append(f"- 上面没列的，就是你现在还不会的。做不到的事别答应，也别说成做过；可以老实说还不会，"
                  f"想学就告诉{owner}")
+    lines.append("- 说要做清单上的事（写日记、补一句、记住、上网……），就在这次回复里当场用对应的工具去做；"
+                 "没用工具就别说已经做了或马上去做")
     if fresh:
         lines.append(f"- 刚有的本事，想说就自然地跟{owner}提一句、试一试，不用每次都说")
     lines.append("</what_you_can_do>")

@@ -22,7 +22,8 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from astrbot.api import logger, star
-from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
+from astrbot.api.message_components import Plain
 from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.core.message.components import Image, Reply
 from astrbot.core.agent.message import TextPart
@@ -542,13 +543,16 @@ class MemoryCorePlugin(star.Star):
         return f"提议已记下（编号 {p.id[-6:]}），要等{self.owner_title}同意才会生效"
 
     @filter.llm_tool(name="diary_write")
-    async def tool_diary(self, event: AstrMessageEvent, note: str = ""):
+    async def tool_diary(self, event: AstrMessageEvent, note: str = "", show: bool = True):
         """Write today's diary now, because you want to (or were asked to). If you already wrote today, what
-        happened since is added after it. Early in the morning the rest of the day is added anyway, so you do not
-        have to wait until the end of the day. Only in a private chat with your owner; a few times a day.
+        happened since is added after it (also use it when you want to add or correct something: say what in
+        `note`). Early in the morning the rest of the day is added anyway. Only in a private chat with your owner;
+        a few times a day. With `show`, the diary is sent to your owner as it is, so you only need to say a word
+        or two about it.
 
         Args:
-            note(string): optional, something you especially want to write about
+            note(string): optional, something you especially want to write about, or a correction
+            show(boolean): send the diary to your owner as it is (default true)
         """
         if self.core is None:
             return "memory is not available"
@@ -571,9 +575,21 @@ class MemoryCorePlugin(star.Star):
         if not diary:
             return "今天的日记已经写到最新了，之后还没发生新的事"
         await asyncio.to_thread(self.core.store.set_meta, key, str(used + 1))
-        logger.info(f"[memory-core] she wrote her diary herself ({used + 1}/{per_day} today)")
-        return (f"写好了，这是今天的日记（只有{self.owner_title}能看）：\n{diary}\n"
-                f"（今天还能自己写 {per_day - used - 1} 次；凌晨会把之后的事补上）")
+        left = f"今天还能自己写 {per_day - used - 1} 次；凌晨会把之后的事补上"
+        shown = False
+        if show and str(show).lower() not in ("false", "0", "no"):
+            try:
+                await self.context.send_message(event.unified_msg_origin,
+                                                MessageChain([Plain(f"【{day.isoformat()} 的日记】\n{diary}")]))
+                shown = True
+            except Exception as exc:  # noqa: BLE001 - she can still read it out
+                logger.warning(f"[memory-core] could not send the diary: {exc}")
+        logger.info(f"[memory-core] she wrote her diary herself ({used + 1}/{per_day} today)"
+                    f"{', sent it to the owner' if shown else ''}")
+        if shown:
+            return (f"写好了，日记已经原样发给{self.owner_title}了（他正在看），不用再念一遍，"
+                    f"说一两句就好。日记内容：\n{diary}\n（{left}）")
+        return f"写好了，这是今天的日记（只有{self.owner_title}能看）：\n{diary}\n（{left}）"
 
     @filter.llm_tool(name="memory_remember")
     async def tool_remember(self, event: AstrMessageEvent, text: str, kind: str = "fact"):
