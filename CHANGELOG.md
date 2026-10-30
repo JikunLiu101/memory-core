@@ -6,6 +6,11 @@
   the memory is updated instead of a second one being added; a new `merge` op joins existing memories that record
   the same thing (e.g. a plan and its outcome) into one, keeping their shared scope. `MemoryCore.merge` takes
   extra `sources`.
+- `remember()` (`remember-v1`): remembering on purpose first looks at related memories in the same scope; the
+  model decides add / update / merge / skip and turns relative times into dates. The AstrBot `memory_remember`
+  tool uses it (`remember_check_related`).
+- `due_spaces()`: a chat with fewer new messages than `min_new` is consolidated once it has been quiet for
+  `idle_minutes`. The AstrBot adapter uses it (`consolidate_idle_minutes`, default 60).
 - Nightly merge (`merge-v2`): a plan and how it turned out count as the same event.
 
 ## 0.4.0 (2026-10-30)

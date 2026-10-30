@@ -82,6 +82,12 @@
     "type": "int",
     "default": 1200
   },
+  "remember_check_related": {
+    "description": "Check related memories before memory_remember",
+    "type": "bool",
+    "default": true,
+    "hint": "When the model remembers something on purpose, related memories in the same place are checked first (one extra model call): it may update or merge them instead of adding a duplicate."
+  },
   "llm_provider_id": {
     "description": "Chat provider used for consolidation",
     "type": "string",
@@ -98,6 +104,12 @@
     "description": "Minimum new messages per chat before consolidating it",
     "type": "int",
     "default": 10
+  },
+  "consolidate_idle_minutes": {
+    "description": "Also consolidate a quiet chat after N minutes",
+    "type": "int",
+    "default": 60,
+    "hint": "A chat with fewer new messages than consolidate_min_new is consolidated once it has been quiet this long, so a short talk is not left waiting. 0: off."
   },
   "diary_enabled": {
     "description": "Write a diary every day",

@@ -24,6 +24,7 @@ from astrbot.core.agent.message import TextPart
 
 from memory_core import Audience, Episode, Memory, MemoryCore
 from memory_core import timeutil
+from memory_core.consolidate import due_spaces, remember
 from memory_core.metabolism import fade, merge_duplicates
 from memory_core.proposals import proposals, propose, resolve
 from memory_core.reflect import current_day, day_window, diary_for, update_self_image, write_diary
@@ -302,8 +303,17 @@ class MemoryCorePlugin(star.Star):
         space, _, owner = self._where(event)
         memory = Memory(kind=kind, text=text, scope=default_scope(space, owner), importance=0.7,
                         derived_by="astrbot-tool")
-        await asyncio.to_thread(self.core.add_memory, memory)
-        return "记住了"
+        provider_id = self._provider_id() if self.cfg.get("remember_check_related", True) else None
+        llm = AstrBotLLM(self.context, provider_id, asyncio.get_running_loop(), timeout=60) if provider_id else None
+        try:
+            # related memories in the same place are checked first: new, an update of one, a merge, or known
+            result = await asyncio.to_thread(remember, self.core, llm, memory, Audience(space, owner_present=owner))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[memory-core] remember failed: {exc}")
+            return "没记住，出了点问题"
+        logger.info(f"[memory-core] remember: {result.op} {result.memory.id}")
+        return {"add": "记住了", "update": "记住了，顺便更新了原来那条", "merge": "记住了，和原来的几条合成了一条",
+                "skip": "这个本来就记得"}[result.op]
 
     # ---------------------------------------------------------------- consolidation
 
@@ -323,10 +333,18 @@ class MemoryCorePlugin(star.Star):
         async with self._consolidating:
             def run():
                 spaces = self.core.store.space_heads().keys()
-                return self.core.consolidate(llm, owner_spaces=owner_spaces(spaces, self.owner_ids),
-                                             min_new=1 if force else int(self.cfg.get("consolidate_min_new", 10)))
+                # every chat with new messages when forced; otherwise those with enough new ones, plus quiet ones
+                due = None if force else due_spaces(
+                    self.core, min_new=int(self.cfg.get("consolidate_min_new", 10)),
+                    idle_minutes=float(self.cfg.get("consolidate_idle_minutes", 60)))
+                if due == []:
+                    return None
+                return self.core.consolidate(llm, spaces=due, owner_spaces=owner_spaces(spaces, self.owner_ids),
+                                             min_new=1)
             started = time.monotonic()
             report = await asyncio.to_thread(run)
+        if report is None:
+            return {"episodes": 0, "added": 0, "updated": 0, "rejected": 0, "seconds": 0}
         summary = {"episodes": report.episodes, "added": len(report.added), "updated": len(report.updated),
                    "rejected": len(report.rejected), "seconds": round(time.monotonic() - started, 1)}
         if report.episodes:

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from . import timeutil
 from .llm import LLM, parse_json
@@ -259,3 +259,95 @@ def _scope_within(candidate: str, original: str) -> bool:
     if candidate == original:
         return True
     return original == PUBLIC  # narrowing a public memory is fine; anything else keeps the original
+
+
+# ---------------------------------------------------------------- which spaces to consolidate now
+
+
+def due_spaces(core, *, min_new: int = 10, idle_minutes: float = 60, now=None) -> list[str]:
+    """Spaces to consolidate now: those with at least `min_new` new episodes, and also quiet ones (no new
+    episode for `idle_minutes`) with at least one, so a short chat does not wait for the next one."""
+    now = now or timeutil.now()
+    busy = set(pending(core, min_new))
+    due = list(busy)
+    if idle_minutes and idle_minutes > 0:
+        for space in pending(core, 1):
+            if space in busy:
+                continue
+            last = core.recent(space, 1)
+            if last and timeutil.age_days(last[-1].occurred_at, now) * 1440 >= idle_minutes:
+                due.append(space)
+    return due
+
+
+# ---------------------------------------------------------------- remembering on purpose
+
+REMEMBER_PROMPT_VERSION = "remember-v1"
+
+REMEMBER_SYSTEM = """\
+You maintain the long-term memory of an AI companion ("I"). I want to remember something right now. Below is \
+the new memory and the existing memories that may be about the same thing.
+
+Decide:
+- "add": it is new; give "text" (the same sentence, with relative times such as "today" or "next Saturday" \
+turned into dates using Today below).
+- "update": it changes, corrects or completes ONE existing memory (e.g. how a plan in it turned out). Give \
+"target" and one text that keeps what is still true of the old memory plus the new information.
+- "merge": it and two or more existing memories record the same thing. Give "targets" and one text keeping \
+every detail.
+- "skip": an existing memory already says exactly this.
+
+Write in the language of the memories, one or two self-contained sentences, names instead of pronouns, \
+dates instead of relative times.
+Answer with JSON only: {"op": "add" | "update" | "merge" | "skip", "target": "E1", "targets": ["E1", "E2"], \
+"text": "..."}"""
+
+
+@dataclass
+class RememberResult:
+    op: str  # add | update | merge | skip
+    memory: Memory  # the memory that now holds it (new, or the existing one for skip)
+    replaced: list[str] = field(default_factory=list)  # ids of memories it superseded
+
+
+def remember(core, llm: LLM | None, memory: Memory, audience: Audience, *, k: int = 8) -> RememberResult:
+    """Store a memory on purpose, but first look at related memories in the same scope and let the model decide
+    whether it is new, updates one, merges several or is already known. Without a model, or when nothing
+    related exists, or when the model's answer is unusable, it is simply added."""
+    related = []
+    if llm is not None:
+        related = [h.memory for h in core.recall(memory.text, audience, k=k, reinforce=False)
+                   if h.memory.scope == memory.scope and h.memory.kind != MemoryKind.DIARY]
+    if not related:
+        return RememberResult("add", core.add_memory(memory))
+    labels = {f"E{i + 1}": m for i, m in enumerate(related)}
+    today = timeutil.now().astimezone()
+    user = "\n".join([f"Today: {today:%Y-%m-%d} ({today:%A})", "", "New memory:", memory.text, "",
+                      "Existing memories:",
+                      *(f"{k_}: {m.text}" for k_, m in labels.items())])
+    derived_by = f"{llm.model_id}/{REMEMBER_PROMPT_VERSION}"
+    try:
+        data = parse_json(llm.complete(REMEMBER_SYSTEM, user))
+        op = data.get("op", "add")
+        text = str(data.get("text") or "").strip() or memory.text
+        if op == "skip":
+            target = labels.get(data.get("target", "")) or related[0]
+            return RememberResult("skip", target)
+        if op == "update" and data.get("target") in labels:
+            old = labels[data["target"]]
+            new = core.supersede(old.id, Memory(
+                kind=memory.kind, text=text, scope=old.scope, subjects=list(dict.fromkeys(
+                    [*old.subjects, *memory.subjects])), sources=list(dict.fromkeys([*old.sources, *memory.sources])),
+                importance=max(old.importance, memory.importance), derived_by=derived_by))
+            return RememberResult("update", new, [old.id])
+        if op == "add" and text != memory.text:
+            memory = replace(memory, text=text)
+        if op == "merge":
+            olds = [labels[t] for t in dict.fromkeys(data.get("targets") or []) if t in labels]
+            if len(olds) >= 2:
+                new = core.merge([m.id for m in olds], text, derived_by=derived_by, sources=memory.sources,
+                                 importance=max([memory.importance, *(m.importance for m in olds)]))
+                return RememberResult("merge", new, [m.id for m in olds])
+    except Exception as exc:  # noqa: BLE001 - the model being down or confused must never lose the memory
+        log.info("remember: checking related memories failed, adding as is: %s", exc)
+    return RememberResult("add", core.add_memory(memory))
