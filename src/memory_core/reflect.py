@@ -41,6 +41,18 @@ DIARY_SYSTEM = """\
 
 DIARY_EMPTY_NOTE = "（今天没有人来找你说话，你也没有做别的事。）"
 
+DIARY_MORE_SYSTEM = """\
+{persona}
+
+---
+你今天早些时候已经写过一段日记了。现在接着往下写：只写“后来的经历”里的事和你的感受，接在已经写好的那段后面。
+
+要求：
+- 第一人称，像你平时说话那样；和前面那段自然衔接，不重复前面写过的内容，不改写前面那段
+- 只写后来真的发生过的事，不编造；后来的事很平淡就写短一点
+- 50 到 250 字；不要标题、不要日期行，直接写接下去的正文
+- 日记只有你和{owner}会看"""
+
 SELF_IMAGE_SYSTEM = """\
 {persona}
 
@@ -118,28 +130,52 @@ def _transcript(core, episodes, owner_spaces: set[str], owner: str) -> str:
     return text
 
 
+def unwritten(core, day: date, start: datetime, end: datetime) -> list:
+    """Episodes of the day that came after its diary was written (all of them when there is no diary)."""
+    existing = diary_for(core, day)
+    done = set(existing.sources) if existing is not None else set()
+    return [ep for ep in core.episodes(since=start, until=end) if ep.id not in done]
+
+
 def write_diary(core, llm: LLM, day: date, start: datetime, end: datetime, *, persona: str = "",
                 owner_spaces=(), write_quiet_days: bool = True, force: bool = False,
-                owner_title: str = "主人") -> DiaryResult:
-    """Write the diary of `day`, from the episodes in [start, end). Idempotent unless `force`."""
+                owner_title: str = "主人", extend: bool = False, note: str = "") -> DiaryResult:
+    """Write the diary of `day`, from the episodes in [start, end). Idempotent unless `force` (rewrite the day)
+    or `extend` (keep what is written and continue it with what happened since; nothing new: skipped).
+    `note`: something the being wants to be sure to write about."""
     existing = diary_for(core, day)
-    if existing is not None and not force:
+    if existing is not None and not (force or extend):
         return DiaryResult(existing, 0, skipped="already written")
     episodes = core.episodes(since=start, until=end)
-    if not episodes and not write_quiet_days:
+    more = existing is not None and extend and not force
+    if more:
+        done = set(existing.sources)
+        new = [ep for ep in episodes if ep.id not in done]
+        if not new and not note.strip():
+            return DiaryResult(existing, 0, skipped="nothing new")
+    elif not episodes and not write_quiet_days:
         return DiaryResult(None, 0, skipped="nothing happened")
 
     owner_spaces = set(owner_spaces)
+    persona = persona.strip() or "你是一个电子生命。"
     parts = [f"日期：{day.isoformat()}（{'一二三四五六日'[day.weekday()]}）"]
-    previous = recent_diaries(core, day - timedelta(days=1), days=1)
-    if previous:
-        parts += ["", "昨天的日记（供参考，不要重复）：", previous[-1][1].text]
-    parts += ["", "今天的经历：", _transcript(core, episodes, owner_spaces, owner_title) if episodes else DIARY_EMPTY_NOTE]
-    text = llm.complete(DIARY_SYSTEM.format(persona=persona.strip() or "你是一个电子生命。", owner=owner_title),
-                        "\n".join(parts))
-    text = text.strip()
+    if more:
+        parts += ["", "你今天已经写好的日记（原样保留，接着它往下写）：", existing.text, "",
+                  "后来的经历：", _transcript(core, new, owner_spaces, owner_title) if new else "（后来没发生什么新的事。）"]
+    else:
+        previous = recent_diaries(core, day - timedelta(days=1), days=1)
+        if previous:
+            parts += ["", "昨天的日记（供参考，不要重复）：", previous[-1][1].text]
+        parts += ["", "今天的经历：",
+                  _transcript(core, episodes, owner_spaces, owner_title) if episodes else DIARY_EMPTY_NOTE]
+    if note.strip():
+        parts += ["", f"你特别想写进去的：{note.strip()[:200]}"]
+    system = (DIARY_MORE_SYSTEM if more else DIARY_SYSTEM).format(persona=persona, owner=owner_title)
+    text = llm.complete(system, "\n".join(parts)).strip()
     if not text:
         raise ValueError("the model returned an empty diary")
+    if more:
+        text = f"{existing.text.rstrip()}\n\n{text}"
 
     me = core.ensure_entity(SELF_ALIAS)
     memory = Memory(

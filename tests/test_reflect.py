@@ -104,3 +104,26 @@ def test_day_boundary():
     assert current_day(late.astimezone(), 4) == date(2026, 10, 29)
     start, end = day_window(date(2026, 10, 29), 4)
     assert start.hour == 4 and end - start == timedelta(days=1)
+
+
+def test_extend_keeps_what_was_written_and_adds_what_came_after(core):
+    day, start, end = _window()
+    _say(core, DM, "owner", "今天去公园了", start + timedelta(hours=10))
+    first = write_diary(core, FakeLLM("上午老板去了公园"), day, start, end, note="想记下公园").memory
+    llm = FakeLLM("不该被调用")
+    assert write_diary(core, llm, day, start, end, extend=True).skipped == "nothing new" and not llm.calls
+    _say(core, DM, "owner", "晚上吃了火锅", start + timedelta(hours=16))
+    llm = FakeLLM("晚上还吃了火锅")
+    more = write_diary(core, llm, day, start, end, extend=True).memory
+    assert more.text == "上午老板去了公园\n\n晚上还吃了火锅"
+    assert "火锅" in llm.calls[0][1] and "今天去公园了" not in llm.calls[0][1]  # only what came after
+    assert "上午老板去了公园" in llm.calls[0][1]  # given as what is already written
+    assert core.memory(first.id).status == "superseded" and len(more.sources) == 2
+
+
+def test_extend_without_a_diary_writes_one_and_note_is_passed(core):
+    day, start, end = _window()
+    _say(core, DM, "owner", "hi", start + timedelta(hours=1))
+    llm = FakeLLM("第一篇")
+    assert write_diary(core, llm, day, start, end, extend=True, note="爱吃鱼").memory.text == "第一篇"
+    assert "你特别想写进去的：爱吃鱼" in llm.calls[0][1]

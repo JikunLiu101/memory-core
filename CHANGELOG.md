@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The being can write its diary itself (`diary_write`, AstrBot adapter, only in the owner's private chat,
+  `diary_tool_per_day`, default 3). `write_diary(extend=True)` keeps what is written and continues it with what
+  happened since (`unwritten()`); `note` is something the being wants to be sure to write about. The daily routine
+  finishes such a day early next morning, and the self-image is refreshed once per day (`self_image:day`).
 - What the being can do (`memory_core.abilities`): the host lists the being's abilities (a stable key, a short
   verb-phrase name, one line on how it works); the list goes into the prompt, and anything not on it is something
   the being cannot do yet. The last known list is kept in the store: a new ability is marked new for a while

@@ -59,7 +59,7 @@ IDENTITY_DOCS = (("self", "identity"), ("self-image", "self_image"), ("voice", "
 
 
 def memory_guide(owner_title: str = "主人", diary_hour: int = 4, *, diary: bool = True,
-                 tidy: bool = True) -> str:
+                 tidy: bool = True, diary_now: bool = False) -> str:
     """How the being's memory works, so it neither denies having one nor asks for it to be "turned on".
     The daily schedule follows the plugin settings, so what it says about itself is true."""
     daily = []
@@ -67,6 +67,8 @@ def memory_guide(owner_title: str = "主人", diary_hour: int = 4, *, diary: boo
         daily.append(
             f"- 每天凌晨{diary_hour}点左右，你会回顾前一天写一篇日记（凌晨{diary_hour}点前熬的夜算前一天；"
             f"日记只有{owner_title}能看），再根据最近一周的日记更新 <self_image>，也就是“我眼中的自己”\n")
+        if diary_now:
+            daily.append("- 白天想写也可以自己写（diary_write）：写过的会接着往下写，凌晨再把之后的事补上\n")
     if tidy:
         when = "写完日记后" if diary else f"每天凌晨{diary_hour}点左右"
         daily.append(

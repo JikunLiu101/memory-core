@@ -34,7 +34,7 @@ from memory_core.consolidate import due_spaces, remember
 from memory_core.metabolism import fade, merge_duplicates
 from memory_core.now import describe, mood_due, snapshot, update_mood
 from memory_core.proposals import proposals, propose, resolve
-from memory_core.reflect import current_day, day_window, diary_for, update_self_image, write_diary
+from memory_core.reflect import current_day, day_window, diary_for, unwritten, update_self_image, write_diary
 from memory_core.vision import Seen, caption_block, look, outline
 
 from .logic import (
@@ -61,6 +61,7 @@ except Exception:  # noqa: BLE001 - internal name, may move between AstrBot vers
     _WEBCHAT_DEFAULT = ""
 
 PLUGIN_NAME = "astrbot_plugin_memory_core"
+SELF_IMAGE_DAY = "self_image:day"  # the last day the self-image was refreshed for
 
 
 def _no_urls(text) -> str:
@@ -316,7 +317,8 @@ class MemoryCorePlugin(star.Star):
         docs = [(tag, self.core.identity(name)) for name, tag in IDENTITY_DOCS]
         guide = memory_guide(self.owner_title, int(self.cfg.get("diary_hour", 4)),
                              diary=bool(self.cfg.get("diary_enabled", True)),
-                             tidy=bool(self.cfg.get("tidy_enabled", True)))
+                             tidy=bool(self.cfg.get("tidy_enabled", True)),
+                             diary_now=int(self.cfg.get("diary_tool_per_day", 3)) > 0)
         block = identity_block(docs, guide=guide)
         if not block:
             return
@@ -354,6 +356,10 @@ class MemoryCorePlugin(star.Star):
         if self.cfg.get("diary_enabled", True):
             out.append(Ability("memory-core:diary", "写日记",
                                f"每天凌晨{int(self.cfg.get('diary_hour', 4))}点左右自动回顾前一天写一篇，只有{owner}能看"))
+            if int(self.cfg.get("diary_tool_per_day", 3)) > 0:
+                out.append(Ability("memory-core:diary-now", "想写就自己写日记",
+                                   f"和{owner}私聊时用 diary_write 现在就写今天的（写过的会接着往下写），"
+                                   f"一天至多{int(self.cfg.get('diary_tool_per_day', 3))}次；写完可以念给{owner}听"))
         if self.cfg.get("vision_enabled", True) and any(
                 self.context.get_provider_by_id(str(p).strip()) for p in self.cfg.get("vision_providers", []) or []):
             out.append(Ability("memory-core:vision", "看图",
@@ -535,6 +541,40 @@ class MemoryCorePlugin(star.Star):
         logger.info(f"[memory-core] identity proposal {p.id}: {text}")
         return f"提议已记下（编号 {p.id[-6:]}），要等{self.owner_title}同意才会生效"
 
+    @filter.llm_tool(name="diary_write")
+    async def tool_diary(self, event: AstrMessageEvent, note: str = ""):
+        """Write today's diary now, because you want to (or were asked to). If you already wrote today, what
+        happened since is added after it. Early in the morning the rest of the day is added anyway, so you do not
+        have to wait until the end of the day. Only in a private chat with your owner; a few times a day.
+
+        Args:
+            note(string): optional, something you especially want to write about
+        """
+        if self.core is None:
+            return "memory is not available"
+        space, _, owner = self._where(event)
+        if not owner:
+            logger.info(f"[memory-core] diary_write refused outside the owner's private chat ({space})")
+            return f"日记只能在和{self.owner_title}私聊的时候写"
+        if not self.cfg.get("diary_enabled", True):
+            return "现在不写日记"
+        day = current_day(timeutil.now(), int(self.cfg.get("diary_hour", 4)))
+        key, per_day = f"diary_tool:{day.isoformat()}", int(self.cfg.get("diary_tool_per_day", 3))
+        used = int(self.core.store.get_meta(key) or 0)
+        if used >= per_day:
+            return f"今天已经自己写了 {used} 次日记了，剩下的凌晨会自动补上"
+        try:
+            diary, _ = await self.reflect_day(day, extend=True, note=note, self_image=False)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[memory-core] diary_write failed: {exc}")
+            return "这次没写成，等会儿再试试"
+        if not diary:
+            return "今天的日记已经写到最新了，之后还没发生新的事"
+        await asyncio.to_thread(self.core.store.set_meta, key, str(used + 1))
+        logger.info(f"[memory-core] she wrote her diary herself ({used + 1}/{per_day} today)")
+        return (f"写好了，这是今天的日记（只有{self.owner_title}能看）：\n{diary}\n"
+                f"（今天还能自己写 {per_day - used - 1} 次；凌晨会把之后的事补上）")
+
     @filter.llm_tool(name="memory_remember")
     async def tool_remember(self, event: AstrMessageEvent, text: str, kind: str = "fact"):
         """Remember something important for the long term, e.g. when someone asks you to remember it.
@@ -615,14 +655,17 @@ class MemoryCorePlugin(star.Star):
         tags = dict(IDENTITY_DOCS)
         return identity_block([(tags[n], self.core.identity(n)) for n in names], guide="")
 
-    async def reflect_day(self, day, *, force: bool = False) -> tuple[str | None, str | None]:
-        """Write the diary of `day`, then refresh the self-image. Returns (diary text, self-image)."""
+    async def reflect_day(self, day, *, force: bool = False, extend: bool = False, note: str = "",
+                          self_image: bool = True) -> tuple[str | None, str | None]:
+        """Write the diary of `day` (`extend`: continue what is written with what happened since), then refresh
+        the self-image (once per day, unless the diary was just rewritten). Returns (diary text, self-image)."""
         provider_id = self._provider_id()
         if not provider_id:
             raise RuntimeError("no chat provider available for the diary")
         llm = AstrBotLLM(self.context, provider_id, asyncio.get_running_loop())
         hour = int(self.cfg.get("diary_hour", 4))
         start, end = day_window(day, hour)
+        had = await asyncio.to_thread(diary_for, self.core, day) is not None
         async with self._reflecting:
             def run():
                 if not self.core.episodes(until=end, limit=1):
@@ -632,16 +675,22 @@ class MemoryCorePlugin(star.Star):
                                      persona=self._persona("self", "self-image", "voice"),
                                      owner_spaces=owner_spaces(spaces, self.owner_ids),
                                      write_quiet_days=bool(self.cfg.get("diary_quiet_days", True)), force=force,
-                                     owner_title=self.owner_title)
-                if result.memory is None or result.skipped:
-                    return (result.memory.text if result.memory else None), None
+                                     owner_title=self.owner_title, extend=extend, note=note)
+                if result.memory is None:
+                    return None, None
+                wrote = not result.skipped
+                if not self_image or not (wrote or self.core.store.get_meta(SELF_IMAGE_DAY) != day.isoformat()):
+                    return (result.memory.text if wrote else None), None
                 image = update_self_image(self.core, llm, day, persona=self._persona("self", "voice"),
                                           days=int(self.cfg.get("self_image_days", 7)),
                                           owner_title=self.owner_title)
-                return result.memory.text, image
+                self.core.store.set_meta(SELF_IMAGE_DAY, day.isoformat())
+                return (result.memory.text if wrote else None), image
             diary, image = await asyncio.to_thread(run)
-        if diary:
-            logger.info(f"[memory-core] diary for {day} ready; self-image {'updated' if image else 'unchanged'}")
+        if diary or image:
+            how = ("continued" if extend and had and not force else "rewritten" if had else "written") if diary \
+                else "unchanged"
+            logger.info(f"[memory-core] diary for {day} {how}; self-image {'updated' if image else 'unchanged'}")
         return diary, image
 
     async def tidy(self) -> dict:
@@ -659,6 +708,15 @@ class MemoryCorePlugin(star.Star):
         logger.info(f"[memory-core] tidy: {summary}")
         return summary
 
+    def _day_unfinished(self, day) -> bool:
+        """No diary yet, things happened after she wrote it herself, or the self-image is not refreshed."""
+        if diary_for(self.core, day) is None:
+            return True
+        if self.core.store.get_meta(SELF_IMAGE_DAY) != day.isoformat():
+            return True
+        start, end = day_window(day, int(self.cfg.get("diary_hour", 4)))
+        return bool(unwritten(self.core, day, start, end))
+
     async def _diary_loop(self) -> None:
         """Once a day: the diary of the finished day, the self-image, then memory metabolism."""
         hour = int(self.cfg.get("diary_hour", 4))
@@ -670,9 +728,10 @@ class MemoryCorePlugin(star.Star):
                     except Exception as exc:  # noqa: BLE001 - the diary must still be written
                         logger.warning(f"[memory-core] mood update failed (will retry): {exc}")
                 yesterday = current_day(timeutil.now(), hour) - timedelta(days=1)  # a finished day
-                if self.cfg.get("diary_enabled", True) and \
-                        await asyncio.to_thread(diary_for, self.core, yesterday) is None:
-                    await self.reflect_day(yesterday)
+                if self.core.store.get_meta(SELF_IMAGE_DAY) is None:  # before this was tracked
+                    self.core.store.set_meta(SELF_IMAGE_DAY, yesterday.isoformat())
+                if self.cfg.get("diary_enabled", True) and await asyncio.to_thread(self._day_unfinished, yesterday):
+                    await self.reflect_day(yesterday, extend=True)
                 if self.cfg.get("tidy_enabled", True) and \
                         self.core.store.get_meta("tidy:last") != yesterday.isoformat():
                     await self.tidy()

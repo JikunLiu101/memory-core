@@ -128,6 +128,12 @@
     "type": "bool",
     "default": true
   },
+  "diary_tool_per_day": {
+    "description": "Times a day the being may write its diary itself",
+    "type": "int",
+    "default": 3,
+    "hint": "diary_write, only in the owner's private chat. What happens after is added early next morning. 0 = only the daily diary."
+  },
   "self_image_days": {
     "description": "Diaries considered when rewriting the self-image",
     "type": "int",
