@@ -46,7 +46,7 @@ def test_add_with_labels_resolved_and_scope_kept_in_space(core):
     assert pref.scope == f"space:{G1}"
     assert pref.subjects == [core.entity("qq:1001").id]
     assert len(pref.sources) == 1 and core.episode(pref.sources[0]).content == "我不吃香菜"
-    assert pref.derived_by == "fake/consolidate-v1"
+    assert pref.derived_by == "fake/consolidate-v2"
     assert lex.scope == "public"
     system, user = llm.calls[0]
     assert system == SYSTEM_PROMPT
@@ -148,3 +148,37 @@ def test_what_it_saw_online_is_public_what_it_thought_is_owners(core):
     assert "(public:" in llm.calls[0][1]
     # it comes up in a private chat as well
     assert core.recall("星露谷", Audience(DM, owner_present=True), reinforce=False)
+
+
+def test_merge_plan_and_outcome(core):
+    from memory_core import Memory
+    plan = core.add_memory(Memory(kind="event", text="主人中午要去吃一家拉面", scope="owner", importance=0.35))
+    outcome = core.add_memory(Memory(kind="event", text="主人吃的拉面很难吃，3/10", scope="owner", importance=0.7))
+    _chat(core, DM, [("qq:owner", "那家拉面满分5分我顶多给2分")])
+    llm = FakeLLM({"memories": [
+        {"op": "merge", "targets": ["E1", "E2"], "kind": "event", "evidence": ["M1"],
+         "text": "主人中午去吃了一家拉面，很难吃：3/10，满分5分顶多2分"},
+    ]})
+    report = core.consolidate(llm, owner_spaces=[DM])
+    assert not report.rejected and not report.added
+    new_id = report.updated[0][1]
+    merged = core.memory(new_id)
+    assert merged.scope == "owner" and merged.importance == 0.7  # kept from the originals
+    assert core.memory(plan.id).status == "superseded" and core.memory(outcome.id).status == "superseded"
+    assert len(merged.sources) == 1  # the new evidence
+    hits = core.recall("拉面", Audience(DM, owner_present=True), reinforce=False)
+    assert [h.memory.id for h in hits] == [new_id]
+    assert "turned out" in llm.calls[0][0] and '"merge"' in llm.calls[0][0]
+
+
+def test_merge_needs_two_targets_and_one_scope(core):
+    from memory_core import Memory
+    core.add_memory(Memory(kind="fact", text="阿明喜欢猫", scope=f"space:{G1}"))
+    core.add_memory(Memory(kind="fact", text="阿明喜欢猫咪", scope="public"))
+    _chat(core, G1, [("qq:1001", "我喜欢猫")])
+    llm = FakeLLM({"memories": [
+        {"op": "merge", "targets": ["E1"], "text": "x"},
+        {"op": "merge", "targets": ["E1", "E2"], "text": "阿明喜欢猫"},
+    ]})
+    report = core.consolidate(llm)
+    assert len(report.rejected) == 2 and not report.updated

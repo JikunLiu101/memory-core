@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Consolidation (prompt `consolidate-v2`): when new messages tell how a plan in an existing memory turned out,
+  the memory is updated instead of a second one being added; a new `merge` op joins existing memories that record
+  the same thing (e.g. a plan and its outcome) into one, keeping their shared scope. `MemoryCore.merge` takes
+  extra `sources`.
+- Nightly merge (`merge-v2`): a plan and how it turned out count as the same event.
+
 ## 0.4.0 (2026-10-30)
 
 - Public spaces (`[spaces] public` in config.toml, default `["web"]`): what the being saw there on its own becomes

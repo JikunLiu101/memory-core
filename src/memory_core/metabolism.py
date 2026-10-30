@@ -24,12 +24,14 @@ from .models import MemoryKind, MemoryStatus
 
 log = logging.getLogger("memory_core.metabolism")
 
-MERGE_PROMPT_VERSION = "merge-v1"
+MERGE_PROMPT_VERSION = "merge-v2"
 _MERGE_CHECKED = "merge:checked:"
 
 MERGE_SYSTEM = """\
 You maintain the long-term memory of an AI companion. Below are memories that look similar. Decide whether \
 they record the same thing (the same fact or the same event, possibly worded differently).
+
+A plan and how it turned out ("will go to X" and "went to X, it was bad") are the same event.
 
 If they do, write ONE memory that keeps every detail from all of them (names, dates, numbers), as one \
 self-contained sentence or two, in the language of the memories. If they are related but different things, \

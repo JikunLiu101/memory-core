@@ -18,7 +18,7 @@ from .scope import OWNER, PUBLIC, SELF, Audience, space_scope
 
 log = logging.getLogger("memory_core.consolidate")
 
-PROMPT_VERSION = "consolidate-v1"
+PROMPT_VERSION = "consolidate-v2"
 SELF_ALIAS = "self"
 _CURSOR = "cursor:consolidate:"
 _ALLOWED_KINDS = {MemoryKind.FACT, MemoryKind.EVENT, MemoryKind.RELATION, MemoryKind.PREFERENCE,
@@ -38,6 +38,13 @@ Rules:
 "he"/"she". Include the date for events when it matters.
 - If a new fact changes or contradicts an existing memory (E-labels), use op "update" with that target \
 instead of adding a duplicate.
+- If the new messages tell how a plan, wish or open question in an existing memory turned out (it happened, \
+it was cancelled, how it went, a rating), use op "update" on that memory: one sentence with both the plan and \
+the outcome. Do not add the outcome as a separate memory.
+- If two or more existing memories record the same thing (the same fact or event, or a plan and how it turned \
+out), use op "merge" with "targets" (their E-labels) and one text that keeps every detail of them, plus \
+anything the new messages add. Before any "update", check the other existing memories: when one of them is \
+about the same thing (e.g. the plan and its outcome), use "merge" on all of them instead, so one memory is left.
 - subjects: who or what the memory is about. Use P-labels for participants; for other people or things give \
 {"name": ..., "type": "person|group|place|work|concept|thing"}.
 - evidence: the M-labels of the messages the memory is based on.
@@ -47,9 +54,9 @@ person) or "self" (only for my own feelings or preferences).
 - Never store secrets such as passwords, keys, phone numbers or ID numbers.
 
 Answer with JSON only:
-{"memories": [{"op": "add" | "update", "target": "E1 (update only)", "kind": "fact|event|relation|preference|lexicon", \
-"text": "...", "subjects": ["P1", {"name": "...", "type": "work"}], "evidence": ["M3"], "importance": 0.5, \
-"visibility": "space"}]}
+{"memories": [{"op": "add" | "update" | "merge", "target": "E1 (update only)", "targets": ["E1", "E2"] (merge \
+only), "kind": "fact|event|relation|preference|lexicon", "text": "...", "subjects": ["P1", {"name": "...", \
+"type": "work"}], "evidence": ["M3"], "importance": 0.5, "visibility": "space"}]}
 Return {"memories": []} when nothing is worth keeping."""
 
 
@@ -219,6 +226,16 @@ def _apply(core, item: dict, labels_p, labels_m, labels_e, self_id: str, base_sc
             memory.scope = target.scope
         new = core.supersede(target.id, memory)
         report.updated.append((target.id, new.id))
+    elif op == "merge":
+        olds = [labels_e[t] for t in dict.fromkeys(item.get("targets") or []) if t in labels_e]
+        if len(olds) < 2:
+            raise ValueError("merge needs at least two existing memories (E-labels)")
+        # The merged memory keeps the scope the originals share (core.merge refuses mixed scopes), so a merge can
+        # never make anything more visible; the new evidence is added to its sources.
+        new = core.merge([m.id for m in olds], text, derived_by=derived_by,
+                         importance=importance if "importance" in item else None,
+                         sources=[s for s in sources if item.get("evidence")])
+        report.updated.extend((m.id, new.id) for m in olds)
     elif op == "add":
         report.added.append(core.add_memory(memory).id)
     else:

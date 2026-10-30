@@ -280,9 +280,9 @@ class MemoryCore:
         return m.strength * 0.5 ** (max(0.0, days) / self.weights.strength_half_life_days)
 
     def merge(self, memory_ids: list[str], text: str, *, importance: float | None = None,
-              derived_by: str | None = None) -> Memory:
+              derived_by: str | None = None, sources: list[str] = ()) -> Memory:
         """Replace several memories that say the same thing with one. They must share one scope;
-        the originals stay, marked superseded."""
+        the originals stay, marked superseded. `sources` adds episodes the merged text also draws on."""
         found = self.store.get_memories(memory_ids)
         olds = [found[i] for i in dict.fromkeys(memory_ids) if i in found]
         if len(olds) < 2:
@@ -296,7 +296,7 @@ class MemoryCore:
         merged = self.add_memory(Memory(
             kind=first.kind, text=text, scope=first.scope,
             subjects=list(dict.fromkeys(s for m in olds for s in m.subjects)),
-            sources=list(dict.fromkeys(s for m in olds for s in m.sources)),
+            sources=list(dict.fromkeys([*(s for m in olds for s in m.sources), *sources])),
             importance=importance if importance is not None else max(m.importance for m in olds),
             valid_from=min(starts) if starts else None, derived_by=derived_by or "merge",
             meta={"merged_from": [m.id for m in olds]},
