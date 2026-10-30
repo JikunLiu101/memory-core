@@ -97,7 +97,7 @@ def export_bundle(core: MemoryCore, dest: Path) -> dict:
     memories = core.store.get_memories(ids)
     counts["memories"] = write_lines("memories.jsonl", (_memory_record(memories[i]) for i in ids))
 
-    for sub in ("identity", "attachments"):
+    for sub in ("identity", "attachments", "diary"):
         src = core.root / sub
         if src.exists():
             for path in sorted(p for p in src.rglob("*") if p.is_file() and not p.name.endswith(".tmp")):
@@ -187,7 +187,7 @@ def import_bundle(src: str | Path, dest: str | Path, **open_kwargs) -> MemoryCor
             core.store.set_meta("imported_from", json.dumps(
                 {"generator": manifest.get("generator"), "exported_at": manifest.get("exported_at")}), conn=c)
 
-        for sub in ("identity", "attachments"):
+        for sub in ("identity", "attachments", "diary"):
             if (src / sub).exists():
                 shutil.copytree(src / sub, dest / sub, dirs_exist_ok=True)
     except BaseException:

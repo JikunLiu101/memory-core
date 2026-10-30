@@ -5,6 +5,8 @@
 - recalls relevant memories before each model call and injects them
 - periodically consolidates episodes into memories with AstrBot's own chat model
 - writes a diary every day and refreshes the being's self-image from it
+- memory metabolism: faded memories are archived, duplicates merged; the owner can hard-forget;
+  the being can only propose changes to its core identity, the owner approves
 - gives the model `memory_recall` / `memory_remember` tools
 """
 
@@ -12,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 from astrbot.api import logger, star
@@ -22,6 +24,8 @@ from astrbot.core.agent.message import TextPart
 
 from memory_core import Audience, Episode, Memory, MemoryCore
 from memory_core import timeutil
+from memory_core.metabolism import fade, merge_duplicates
+from memory_core.proposals import proposals, propose, resolve
 from memory_core.reflect import current_day, day_window, diary_for, update_self_image, write_diary
 
 from .logic import (
@@ -81,6 +85,7 @@ class MemoryCorePlugin(star.Star):
         self._consolidating = asyncio.Lock()
         self._reflecting = asyncio.Lock()
         self._known_names: dict[str, str] = {}
+        self._forget_candidates: dict[str, list[str]] = {}  # sender -> memory ids listed by /mem_forget
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -97,7 +102,7 @@ class MemoryCorePlugin(star.Star):
             logger.warning("[memory-core] owner_ids is empty: no conversation is treated as the owner's")
         if int(self.cfg.get("consolidate_interval_minutes", 30)) > 0:
             self._task = asyncio.create_task(self._consolidate_loop())
-        if self.cfg.get("diary_enabled", True):
+        if self.cfg.get("diary_enabled", True) or self.cfg.get("tidy_enabled", True):
             self._diary_task = asyncio.create_task(self._diary_loop())
 
     async def terminate(self) -> None:
@@ -232,6 +237,7 @@ class MemoryCorePlugin(star.Star):
     @filter.llm_tool(name="memory_recall")
     async def tool_recall(self, event: AstrMessageEvent, query: str):
         """Search your long-term memory for things you may have forgotten (people, past events, slang).
+        Also finds faded memories; finding one brings it back.
 
         Args:
             query(string): what to look for
@@ -239,8 +245,28 @@ class MemoryCorePlugin(star.Star):
         if self.core is None:
             return "memory is not available"
         space, _, owner = self._where(event)
-        hits = await asyncio.to_thread(self.core.recall, query, Audience(space, owner_present=owner), 8)
+        hits = await asyncio.to_thread(self.core.recall, query, Audience(space, owner_present=owner), 8,
+                                       include_archived=True)
         return "\n".join(f"- {h.memory.text}" for h in hits) or "（没有相关记忆）"
+
+    @filter.llm_tool(name="identity_propose")
+    async def tool_propose(self, event: AstrMessageEvent, text: str, reason: str = ""):
+        """Propose a change to your core identity (who you are, your name, your rules), which only your owner
+        can approve. Use it rarely, for something you really want to change about yourself, e.g. a name you
+        chose. Everyday feelings and new likes do not need it: they go into your diary and self-image.
+
+        Args:
+            text(string): the change, as one sentence written in first person
+            reason(string): why you want it
+        """
+        if self.core is None:
+            return "memory is not available"
+        space, _, owner = self._where(event)
+        if not owner:
+            reason = f"{reason}（在 {space} 提出）".strip()
+        p = await asyncio.to_thread(propose, self.core, text, reason)
+        logger.info(f"[memory-core] identity proposal {p.id}: {text}")
+        return f"提议已记下（编号 {p.id[-6:]}），要等{self.owner_title}同意才会生效"
 
     @filter.llm_tool(name="memory_remember")
     async def tool_remember(self, event: AstrMessageEvent, text: str, kind: str = "fact"):
@@ -334,17 +360,38 @@ class MemoryCorePlugin(star.Star):
             logger.info(f"[memory-core] diary for {day} ready; self-image {'updated' if image else 'unchanged'}")
         return diary, image
 
+    async def tidy(self) -> dict:
+        """Memory metabolism: archive faded memories, merge duplicates."""
+        provider_id = self._provider_id()
+        llm = AstrBotLLM(self.context, provider_id, asyncio.get_running_loop()) if provider_id else None
+        async with self._reflecting:
+            def run():
+                faded = fade(self.core, archive_below=float(self.cfg.get("archive_below", 0.25)))
+                merged = merge_duplicates(self.core, llm) if llm is not None else None
+                return faded, merged
+            faded, merged = await asyncio.to_thread(run)
+        summary = {"archived": len(faded.archived), "merged": len(merged.merged) if merged else 0,
+                   "kept_apart": merged.kept if merged else 0}
+        logger.info(f"[memory-core] tidy: {summary}")
+        return summary
+
     async def _diary_loop(self) -> None:
+        """Once a day: the diary of the finished day, the self-image, then memory metabolism."""
         hour = int(self.cfg.get("diary_hour", 4))
         while True:
             try:
                 yesterday = current_day(timeutil.now(), hour) - timedelta(days=1)  # a finished day
-                if await asyncio.to_thread(diary_for, self.core, yesterday) is None:
+                if self.cfg.get("diary_enabled", True) and \
+                        await asyncio.to_thread(diary_for, self.core, yesterday) is None:
                     await self.reflect_day(yesterday)
+                if self.cfg.get("tidy_enabled", True) and \
+                        self.core.store.get_meta("tidy:last") != yesterday.isoformat():
+                    await self.tidy()
+                    self.core.store.set_meta("tidy:last", yesterday.isoformat())
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.warning(f"[memory-core] diary failed (will retry later): {exc}")
+                logger.warning(f"[memory-core] daily routine failed (will retry later): {exc}")
             await asyncio.sleep(600)
 
     # ---------------------------------------------------------------- admin commands
@@ -364,6 +411,105 @@ class MemoryCorePlugin(star.Star):
             return
         tail = f"\n\n——我眼中的自己（已更新）——\n{image}" if image else ""
         yield event.plain_result(f"【{day.isoformat()} 的日记】\n{diary}{tail}")
+
+    @staticmethod
+    def _args(event: AstrMessageEvent) -> str:
+        """Everything after the command word."""
+        parts = (event.get_message_str() or "").strip().split(maxsplit=1)
+        return parts[1].strip() if len(parts) > 1 else ""
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("mem_tidy")
+    async def cmd_tidy(self, event: AstrMessageEvent):
+        """整理记忆：淡化的归档、重复的合并"""
+        try:
+            s = await self.tidy()
+        except Exception as exc:
+            yield event.plain_result(f"整理失败：{exc}")
+            return
+        yield event.plain_result(f"归档 {s['archived']} 条淡忘的记忆，合并 {s['merged']} 组重复记忆，"
+                                 f"{s['kept_apart']} 组相似但不同的保留")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("mem_forget")
+    async def cmd_forget(self, event: AstrMessageEvent):
+        """找出要遗忘的记忆：/mem_forget 关键词"""
+        query = self._args(event)
+        if not query:
+            yield event.plain_result("用法：/mem_forget 关键词，列出相关记忆后用 /mem_forget_do 编号 遗忘")
+            return
+        space, _, _ = self._where(event)
+        hits = await asyncio.to_thread(self.core.recall, query, Audience(space, owner_present=True), 10,
+                                       include_archived=True, reinforce=False)
+        self._forget_candidates[str(event.get_sender_id())] = [h.memory.id for h in hits]
+        if not hits:
+            yield event.plain_result("没有找到相关记忆")
+            return
+        lines = [f"{i + 1}. [{h.memory.kind}] {h.memory.text[:80]}" for i, h in enumerate(hits)]
+        yield event.plain_result("\n".join(lines) + "\n\n用 /mem_forget_do 编号（可多个，空格隔开）彻底遗忘。"
+                                 "会连同来源消息一起抹掉，由这些消息整理出的其他记忆也会一起遗忘，"
+                                 "涉及的日记会根据剩下的经历重写。无法撤销。")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("mem_forget_do")
+    async def cmd_forget_do(self, event: AstrMessageEvent):
+        """彻底遗忘 /mem_forget 列出的记忆：/mem_forget_do 1 3"""
+        candidates = self._forget_candidates.get(str(event.get_sender_id()), [])
+        try:
+            picks = sorted({int(x) for x in self._args(event).replace(",", " ").split()})
+            ids = [candidates[i - 1] for i in picks if 1 <= i <= len(candidates)]
+        except ValueError:
+            ids = []
+        if not ids:
+            yield event.plain_result("先用 /mem_forget 关键词 列出记忆，再写编号")
+            return
+        report = await asyncio.to_thread(self.core.forget, ids, with_sources=True)
+        self._forget_candidates.pop(str(event.get_sender_id()), None)
+        rewritten = []
+        for day in report["diaries"]:
+            try:
+                diary, _ = await self.reflect_day(date.fromisoformat(day), force=True)
+                if diary:
+                    rewritten.append(day)
+            except Exception as exc:
+                logger.warning(f"[memory-core] rewriting the diary of {day} failed: {exc}")
+        logger.info(f"[memory-core] forgot {len(report['memories'])} memories, {len(report['episodes'])} episodes")
+        tail = f"，重写了 {', '.join(rewritten)} 的日记" if rewritten else ""
+        yield event.plain_result(f"已遗忘 {len(report['memories'])} 条记忆（含旧版本和由它整理出的记忆）、"
+                                 f"{len(report['episodes'])} 条来源消息{tail}。"
+                                 f"如果“我眼中的自己”里也提到了，请检查 identity/self-image.md")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("mem_proposals")
+    async def cmd_proposals(self, event: AstrMessageEvent):
+        """她对核心身份的修改提议"""
+        pending = await asyncio.to_thread(proposals, self.core)
+        if not pending:
+            yield event.plain_result("没有待处理的提议")
+            return
+        lines = [f"[{p.id[-6:]}] {p.text}" + (f"\n    理由：{p.reason}" if p.reason else "") for p in pending]
+        yield event.plain_result("\n".join(lines) + "\n\n/mem_approve 编号 同意，/mem_reject 编号 拒绝")
+
+    async def _resolve(self, event: AstrMessageEvent, approve: bool):
+        ref = self._args(event)
+        try:
+            p = await asyncio.to_thread(resolve, self.core, ref, approve,
+                                        section=f"后来的补充（经{self.owner_title}同意）")
+        except (KeyError, ValueError) as exc:
+            return f"处理失败：{exc}（编号写错了，或者已经处理过）"
+        return f"已同意，写进了 identity/{p.target}.md：{p.text}" if approve else f"已拒绝：{p.text}"
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("mem_approve")
+    async def cmd_approve(self, event: AstrMessageEvent):
+        """同意她的提议：/mem_approve 编号"""
+        yield event.plain_result(await self._resolve(event, True))
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("mem_reject")
+    async def cmd_reject(self, event: AstrMessageEvent):
+        """拒绝她的提议：/mem_reject 编号"""
+        yield event.plain_result(await self._resolve(event, False))
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("mem_status")

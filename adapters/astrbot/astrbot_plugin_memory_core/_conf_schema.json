@@ -110,5 +110,17 @@
     "description": "Diaries considered when rewriting the self-image",
     "type": "int",
     "default": 7
+  },
+  "tidy_enabled": {
+    "description": "Daily memory metabolism",
+    "type": "bool",
+    "default": true,
+    "hint": "Once a day (after the diary): archive memories that faded (not recalled for long, not important), and merge memories that say the same thing (needs an embedding model). /mem_tidy runs it now."
+  },
+  "archive_below": {
+    "description": "Archive memories whose strength fell below",
+    "type": "float",
+    "default": 0.25,
+    "hint": "Strength halves every 30 days without being recalled. Important memories (>= 0.8) and diaries are never archived; archived ones come back when deliberately recalled."
   }
 }

@@ -123,6 +123,24 @@ update_self_image(core, llm, day, persona=identity_text)
 
 The prompts are Chinese for now; the model answers in the language of its persona and experiences.
 
+## Memory metabolism
+
+A memory that only grows gets worse. `memory_core.metabolism` and `MemoryCore` keep it healthy:
+
+* **Fading**: a memory's strength halves every 30 days it is not recalled (recalling it strengthens it again).
+  `fade(core)` archives weak memories; important ones (importance ≥ 0.8) and diaries are never archived.
+  Archived memories no longer come up by themselves, but a deliberate search
+  (`recall(..., include_archived=True)`) finds them, and that makes them active again.
+* **Merging**: `merge_duplicates(core, llm)` finds similar memories in the same scope by vector similarity and
+  lets the model decide whether they record the same thing; if so they become one memory keeping every detail
+  (`MemoryCore.merge`; the originals stay, marked superseded). Groups kept apart are not asked about again.
+* **Hard forgetting**: `core.forget(ids, with_sources=True)` erases every version of a memory, the episodes it
+  came from, and every other memory derived from those episodes (e.g. that day's diary, which can then be
+  written again from what is left). The only exception to append-only episodes.
+* **Write gate for the core identity**: the being may only `propose(...)` a change to `identity/self.md`;
+  `resolve(..., approve=True)` by the owner appends it under a dated section and keeps the previous version
+  (`memory_core.proposals`).
+
 ## MCP server
 
 Any MCP client (Claude Code, DeepSeek Harness, Codex CLI, ...) can share the same memory:
@@ -143,8 +161,9 @@ what is visible there.
 
 * **AstrBot** — [`adapters/astrbot`](adapters/astrbot/README.md): records every visible message and the bot's own
   answers, uses the identity documents as the persona, injects recalled memories before each reply,
-  consolidates periodically with AstrBot's own chat model, writes the daily diary and self-image, and gives the
-  model `memory_recall` / `memory_remember` tools.
+  consolidates periodically with AstrBot's own chat model, writes the daily diary and self-image, runs the daily
+  memory metabolism, gives the model `memory_recall` / `memory_remember` / `identity_propose` tools, and the owner
+  commands to forget and to approve proposals.
 
 ## Roadmap
 
@@ -152,7 +171,7 @@ what is visible there.
 |---|---|
 | M0 ✅ | Storage, append-only episodes, hybrid recall (full-text + vectors + entities), scopes, soul bundle, tests |
 | M1 ✅ | Consolidation (add / update / supersede, entity aliases), MCP server, AstrBot adapter |
-| M2 🔄 | ✅ Diary and self-image (0.2.0) · Decay and archiving, hard forget along provenance, write gates & proposals |
+| M2 ✅ | Diary and self-image (0.2.0); fading and archiving (0.3.0), merging duplicates, hard forget along provenance, identity proposals |
 | M3 | Public benchmarks (LoCoMo, LongMemEval), docs |
 | M4 | Experience collectors: browser, video sites |
 | M5 | Lexicon (slang/meme) learning, style learning, identity proposals with rollback, inner monologue |

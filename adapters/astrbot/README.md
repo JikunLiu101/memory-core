@@ -12,8 +12,9 @@ gives the bot a long-term memory backed by memory-core.
 | Before each model call | the being's identity documents go first in the system prompt, replacing AstrBot's own persona (see below), followed by a short note on how its memory works; a system-stated line says whether the speaker is the owner. Relevant memories, visible in this chat, are added next to the user's message |
 | Every `consolidate_interval_minutes` | chats with at least `consolidate_min_new` new messages are consolidated with AstrBot's own chat model |
 | Every day after `diary_hour` | the being writes the previous day's diary in its own voice (an owner-only memory, also saved as `diary/<date>.md`) and rewrites `identity/self-image.md` from its recent diaries (old versions go to `identity/history/`) |
-| Model tools | `memory_recall(query)`, `memory_remember(text, kind)` |
-| Admin commands | `/mem_status`, `/mem_consolidate` (runs now, for every chat with new messages), `/mem_diary` (writes today's diary now) |
+| Once a day, after the diary | memory metabolism: faded memories are archived, duplicates merged (`tidy_enabled`, `archive_below`) |
+| Model tools | `memory_recall(query)` (also finds faded memories, which brings them back), `memory_remember(text, kind)`, `identity_propose(text, reason)` (a change to the core identity, waits for the owner) |
+| Admin commands | `/mem_status`, `/mem_consolidate` (runs now, for every chat with new messages), `/mem_diary` (writes today's diary now), `/mem_tidy` (metabolism now), `/mem_forget <words>` then `/mem_forget_do <numbers>` (hard forget, with the source messages; affected diaries are rewritten), `/mem_proposals`, `/mem_approve <id>`, `/mem_reject <id>` |
 
 ### Identity documents
 
@@ -34,7 +35,7 @@ person (`owner_name`) on every platform; their private chats get the `owner` sco
 
 ```bash
 # in AstrBot's Python environment
-pip install "memory-core @ git+https://github.com/JikunLiu101/memory-core@v0.2.0"
+pip install "memory-core @ git+https://github.com/JikunLiu101/memory-core@v0.3.0"
 ```
 
 Copy `astrbot_plugin_memory_core/` into AstrBot's `data/plugins/`, restart AstrBot, then set at least

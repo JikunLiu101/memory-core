@@ -162,6 +162,16 @@ class Store:
         with self.tx() as c:
             c.execute(sql, (key, value))
 
+    def delete_meta(self, key: str) -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM meta WHERE key = ?", (key,))
+
+    def meta_items(self, prefix: str) -> dict[str, str]:
+        with self.read() as c:
+            rows = c.execute("SELECT key, value FROM meta WHERE substr(key, 1, ?) = ? ORDER BY key",
+                             (len(prefix), prefix))
+            return {r[0]: r[1] for r in rows}
+
     # ---------------------------------------------------------------- entities
 
     def insert_entity(self, c: sqlite3.Connection, e: Entity) -> None:
@@ -412,7 +422,62 @@ class Store:
             last_recalled_at=from_iso(row["last_recalled_at"]), subjects=subjects, sources=sources,
         )
 
+    def active_memory_rows(self, kinds_excluded: Iterable[str] = ()) -> list[sqlite3.Row]:
+        excluded = list(kinds_excluded)
+        sql = "SELECT id, kind, scope, importance, strength, created_at, last_recalled_at FROM memory" \
+              " WHERE status = 'active'"
+        if excluded:
+            sql += f" AND kind NOT IN ({','.join('?' * len(excluded))})"
+        with self.read() as c:
+            return c.execute(sql + " ORDER BY id", excluded).fetchall()
+
+    def find_diary(self, day: str) -> str | None:
+        """The active diary memory of a day (fallback when the meta pointer is missing, e.g. after import)."""
+        with self.read() as c:
+            row = c.execute("SELECT id FROM memory WHERE kind = 'diary' AND status = 'active'"
+                            " AND json_extract(meta, '$.date') = ? ORDER BY created_at DESC LIMIT 1",
+                            (day,)).fetchone()
+        return row[0] if row else None
+
+    def memories_citing(self, episode_ids: Iterable[str]) -> list[str]:
+        ids = list(dict.fromkeys(episode_ids))
+        out: list[str] = []
+        with self.read() as c:
+            for start in range(0, len(ids), 500):
+                chunk = ids[start : start + 500]
+                rows = c.execute(f"SELECT DISTINCT memory_id FROM memory_source WHERE episode_id IN"
+                                 f" ({','.join('?' * len(chunk))})", chunk)
+                out.extend(r[0] for r in rows)
+        return sorted(set(out))
+
+    # ---------------------------------------------------------------- forgetting (the one exception to append-only)
+
+    def tombstone_memory(self, c: sqlite3.Connection, memory_id: str, now_iso: str, meta: dict) -> None:
+        """Remove a memory's content everywhere; the row stays as a tombstone (status 'forgotten')."""
+        c.execute("DELETE FROM memory_fts WHERE rowid = (SELECT rowid FROM memory WHERE id = ?)", (memory_id,))
+        c.execute("DELETE FROM embedding WHERE target_type = 'memory' AND target_id = ?", (memory_id,))
+        c.execute("UPDATE memory SET text = '', status = 'forgotten', updated_at = ?, meta = ? WHERE id = ?",
+                  (now_iso, _dumps(meta), memory_id))
+        self.generation += 1
+
+    def tombstone_episode(self, c: sqlite3.Connection, episode_id: str, now_iso: str) -> None:
+        c.execute("DELETE FROM episode_fts WHERE rowid = (SELECT rowid FROM episode WHERE id = ?)", (episode_id,))
+        c.execute("UPDATE episode SET content = '', meta = ? WHERE id = ?",
+                  (_dumps({"forgotten_at": now_iso}), episode_id))
+
     # ---------------------------------------------------------------- embeddings
+
+    def get_embeddings(self, model_id: str, ids: Iterable[str]) -> dict[str, bytes]:
+        ids = list(ids)
+        out: dict[str, bytes] = {}
+        with self.read() as c:
+            for start in range(0, len(ids), 500):
+                chunk = ids[start : start + 500]
+                rows = c.execute(f"SELECT target_id, vector FROM embedding WHERE target_type = 'memory'"
+                                 f" AND model_id = ? AND target_id IN ({','.join('?' * len(chunk))})",
+                                 (model_id, *chunk))
+                out.update({r[0]: r[1] for r in rows})
+        return out
 
     def upsert_embedding(self, c: sqlite3.Connection, target_type: str, target_id: str, model_id: str,
                          dim: int, vector: bytes, created_at: str) -> None:

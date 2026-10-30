@@ -9,7 +9,8 @@ memory-core, diffed, and kept in git. Implementations MUST be able to import eve
 ├── entities.jsonl
 ├── episodes/YYYY-MM.jsonl     # one file per month of occurred_at (UTC)
 ├── memories.jsonl
-├── identity/*.md              # core-memory documents
+├── identity/*.md              # core-memory documents (identity/history/ keeps earlier versions)
+├── diary/<date>.md            # readable copies of diary memories (derived; the memories are authoritative)
 └── attachments/...            # files referenced by episodes (meta paths are relative to this folder)
 ```
 

@@ -72,8 +72,9 @@ def diary_key(day: date) -> str:
 
 def diary_for(core, day: date) -> Memory | None:
     """The current diary entry of a day, if any."""
-    memory_id = core.store.get_meta(diary_key(day))
-    return core.memory(memory_id) if memory_id else None
+    memory_id = core.store.get_meta(diary_key(day)) or core.store.find_diary(day.isoformat())
+    m = core.memory(memory_id) if memory_id else None
+    return m if m is not None and m.status == "active" else None
 
 
 def recent_diaries(core, until_day: date, days: int = 7) -> list[tuple[date, Memory]]:

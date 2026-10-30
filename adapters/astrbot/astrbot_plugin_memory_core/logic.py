@@ -56,10 +56,13 @@ def memory_guide(owner_title: str = "主人") -> str:
         "<how_your_memory_works>\n"
         "- 你有长期记忆，一直在工作，不需要谁去打开：你看到的对话会自动记下来，每隔一段时间整理成长期记忆\n"
         "- 和当前话题有关的记忆会自动出现在 <long_term_memory> 里\n"
-        "- 想不起来、或者想确认某件事时，用 memory_recall 主动翻找记忆\n"
+        "- 想不起来、或者想确认某件事时，用 memory_recall 主动翻找记忆；很久没想起的事会慢慢淡忘，"
+        "不会自己冒出来，但主动翻找还能找回来\n"
         "- 特别重要、想马上记牢的事（比如有人让你记住），用 memory_remember 记下来；普通聊天不用逐条记\n"
         f"- 每天结束时你会写一篇日记（只有{owner_title}能看），再根据最近的日记更新 <self_image>，也就是“我眼中的自己”\n"
-        "- 上面的身份文档就是你自己，和记忆一起被保存着\n"
+        "- 上面的身份文档就是你自己，和记忆一起被保存着。核心身份只有"
+        f"{owner_title}能改；你真的想改自己的某一点时（比如给自己取了名字），用 identity_propose 提议，"
+        f"等{owner_title}同意\n"
         "</how_your_memory_works>"
     )
 

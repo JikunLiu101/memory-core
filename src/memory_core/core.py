@@ -41,7 +41,8 @@ class RecallWeights:
     strength: float = 0.1
     half_life_days: float = 30.0
     min_vector_similarity: float = 0.25
-    reinforce: float = 0.05  # strength gained each time a memory is recalled
+    reinforce: float = 0.2  # strength gained each time a memory is recalled
+    strength_half_life_days: float = 30.0  # unrecalled memories fade: strength halves every this many days
 
 
 def _check_kind(kind: str, enum: type, what: str) -> str:
@@ -272,6 +273,87 @@ class MemoryCore:
             self.store.update_memory(c, memory_id, status=status,
                                      updated_at=timeutil.to_iso(timeutil.now()))
 
+    def effective_strength(self, m: Memory, now: datetime | None = None) -> float:
+        """Stored strength is the strength at the last recall (or creation); it fades from there."""
+        since = m.last_recalled_at or m.created_at
+        days = timeutil.age_days(since, now or timeutil.now()) if since else 0.0
+        return m.strength * 0.5 ** (max(0.0, days) / self.weights.strength_half_life_days)
+
+    def merge(self, memory_ids: list[str], text: str, *, importance: float | None = None,
+              derived_by: str | None = None) -> Memory:
+        """Replace several memories that say the same thing with one. They must share one scope;
+        the originals stay, marked superseded."""
+        found = self.store.get_memories(memory_ids)
+        olds = [found[i] for i in dict.fromkeys(memory_ids) if i in found]
+        if len(olds) < 2:
+            raise ValueError("merge needs at least two existing memories")
+        if len({m.scope for m in olds}) != 1:
+            raise ValueError("cannot merge memories of different scopes")
+        if any(m.status != MemoryStatus.ACTIVE for m in olds):
+            raise ValueError("only active memories can be merged")
+        first = max(olds, key=lambda m: (m.importance, m.created_at))
+        starts = [m.valid_from for m in olds if m.valid_from]
+        merged = self.add_memory(Memory(
+            kind=first.kind, text=text, scope=first.scope,
+            subjects=list(dict.fromkeys(s for m in olds for s in m.subjects)),
+            sources=list(dict.fromkeys(s for m in olds for s in m.sources)),
+            importance=importance if importance is not None else max(m.importance for m in olds),
+            valid_from=min(starts) if starts else None, derived_by=derived_by or "merge",
+            meta={"merged_from": [m.id for m in olds]},
+        ))
+        now_iso = timeutil.to_iso(timeutil.now())
+        with self.store.tx() as c:
+            for m in olds:
+                self.store.update_memory(c, m.id, status=MemoryStatus.SUPERSEDED, valid_to=now_iso,
+                                         updated_at=now_iso, meta={**m.meta, "merged_into": merged.id})
+        return merged
+
+    def forget(self, memory_ids: list[str], *, with_sources: bool = False) -> dict:
+        """Hard forget: every version of each memory (supersede / merge chains) loses its content.
+
+        With `with_sources`, the episodes it came from are erased too, and so is every other memory derived
+        from those episodes (e.g. that day's diary). Returns the ids and diary dates that were forgotten.
+        """
+        chain = self._version_chain(memory_ids)
+        episodes: set[str] = set()
+        if with_sources:
+            for m in self.store.get_memories(chain).values():
+                episodes.update(m.sources)
+            chain = self._version_chain([*chain, *self.store.memories_citing(episodes)])
+        memories = self.store.get_memories(chain)
+        now_iso = timeutil.to_iso(timeutil.now())
+        diaries = sorted({m.meta["date"] for m in memories.values()
+                          if m.kind == MemoryKind.DIARY and m.meta.get("date")})
+        keep_keys = ("supersedes", "superseded_by", "merged_from", "merged_into", "date")
+        with self.store.tx() as c:
+            for m in memories.values():
+                if m.status != MemoryStatus.FORGOTTEN:
+                    keep = {k: v for k, v in m.meta.items() if k in keep_keys}
+                    self.store.tombstone_memory(c, m.id, now_iso, {**keep, "forgotten_at": now_iso})
+            for episode_id in sorted(episodes):
+                self.store.tombstone_episode(c, episode_id, now_iso)
+        for day in diaries:
+            if self.store.get_meta("diary:" + day) in memories:
+                self.store.delete_meta("diary:" + day)
+            mirror = self.root / "diary" / f"{day}.md"
+            if mirror.exists():
+                mirror.unlink()
+        return {"memories": sorted(memories), "episodes": sorted(episodes), "diaries": diaries}
+
+    def _version_chain(self, memory_ids) -> list[str]:
+        seen: set[str] = set()
+        todo = list(memory_ids)
+        while todo:
+            batch = [i for i in dict.fromkeys(todo) if i not in seen]
+            todo = []
+            for m in self.store.get_memories(batch).values():
+                seen.add(m.id)
+                for key in ("supersedes", "superseded_by", "merged_into"):
+                    if m.meta.get(key):
+                        todo.append(m.meta[key])
+                todo.extend(m.meta.get("merged_from") or [])
+        return sorted(seen)
+
     # ---------------------------------------------------------------- recall
 
     def recall(self, query: str, audience: Audience, k: int = 8, *, kinds: list[str] | None = None,
@@ -322,6 +404,7 @@ class MemoryCore:
                 continue
             relevance = raw / best_possible
             recency = 0.5 ** (timeutil.age_days(m.valid_from or m.created_at, now_dt) / w.half_life_days)
+            m.strength = self.effective_strength(m, now_dt)
             score = (w.relevance * relevance + w.recency * recency
                      + w.importance * m.importance + w.strength * m.strength)
             hits.append(RecallHit(memory=m, score=score, relevance=relevance, recency=recency,
@@ -334,8 +417,11 @@ class MemoryCore:
                 for hit in hits:
                     hit.memory.strength = min(1.0, hit.memory.strength + w.reinforce)
                     hit.memory.last_recalled_at = now_dt
-                    self.store.update_memory(c, hit.memory.id, strength=hit.memory.strength,
-                                             last_recalled_at=now_iso)
+                    fields = {"strength": hit.memory.strength, "last_recalled_at": now_iso}
+                    if hit.memory.status == MemoryStatus.ARCHIVED:  # remembered again
+                        hit.memory.status = MemoryStatus.ACTIVE
+                        fields.update(status=MemoryStatus.ACTIVE, updated_at=now_iso)
+                    self.store.update_memory(c, hit.memory.id, **fields)
         return hits
 
     def about(self, entity_ref: str, audience: Audience, k: int = 20) -> list[Memory]:
