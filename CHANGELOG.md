@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Seeing pictures (`memory_core.vision`, prompt `vision-v1`): a vision model describes each picture plainly (what
+  kind of picture, what is in it, its text word for word); the description is cached by the picture's content, so
+  the same sticker is looked at once. Viewers are tried in order (a local model first, a remote one as a fallback).
+  The picture itself can be kept in `attachments/images/`. Optional dependency: `pillow` (`[vision]`).
+  AstrBot adapter: pictures in a message (and in the message it quotes) are looked at when it arrives; the episode
+  says `[图片：...]` instead of `[图片]`; a text-only chat model gets the descriptions instead of the pictures.
+  Settings `vision_enabled`, `vision_providers`, `vision_keep_pictures` (owner / all / none), `vision_max_images`,
+  `vision_timeout`.
 - Daily schedule (`memory_core.now.day_schedule`, `jitter`): bedtime and wake-up drift a little each day (give or
   take 20% of an hour, the same all day, so every plugin agrees); asleep means very low energy, and a note when the
   owner wakes her up. AstrBot adapter: `sleep_hour`, `wake_hour`, `timing_jitter`.

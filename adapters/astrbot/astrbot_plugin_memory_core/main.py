@@ -8,11 +8,13 @@
 - memory metabolism: faded memories are archived, duplicates merged; the owner can hard-forget;
   the being can only propose changes to its core identity, the owner approves
 - gives the model `memory_recall` / `memory_remember` tools
+- sees pictures through a vision model (cached by content) and remembers what was in them
 """
 
 from __future__ import annotations
 
 import asyncio
+import tempfile
 import time
 from datetime import date, timedelta
 from pathlib import Path
@@ -20,6 +22,7 @@ from pathlib import Path
 from astrbot.api import logger, star
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.provider import LLMResponse, ProviderRequest
+from astrbot.core.message.components import Image, Reply
 from astrbot.core.agent.message import TextPart
 
 from memory_core import Audience, Episode, Memory, MemoryCore
@@ -29,6 +32,7 @@ from memory_core.metabolism import fade, merge_duplicates
 from memory_core.now import describe, mood_due, snapshot, update_mood
 from memory_core.proposals import proposals, propose, resolve
 from memory_core.reflect import current_day, day_window, diary_for, update_self_image, write_diary
+from memory_core.vision import Seen, caption_block, look, outline
 
 from .logic import (
     IDENTITY_DOCS,
@@ -155,24 +159,105 @@ class MemoryCorePlugin(star.Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL, priority=10)
     async def on_message(self, event: AstrMessageEvent):
-        """Record every visible message (does not make the bot reply)."""
-        if self.core is None or not self.cfg.get("record_messages", True):
+        """Record every visible message (does not make the bot reply). Pictures are looked at first, so the
+        memory holds what was in them, not just "[图片]"."""
+        if self.core is None:
             return
         text = (event.get_message_outline() or "").strip()
         if not text or is_command(text, self.cfg.get("skip_prefixes", ["/"])):
             return
-        space, is_group, _ = self._where(event)
+        space, is_group, owner = self._where(event)
+        seen = await self._see(event, owner)
+        if seen:
+            text = outline(text, seen)
+        if not self.cfg.get("record_messages", True):
+            return
         if is_group and not self.cfg.get("record_group_messages", True):
             return
+        meta = {"message_id": str(getattr(event.message_obj, "message_id", "") or "")}
+        if seen:
+            meta["images"] = [{"sha": s.sha, "model": s.model, "saved": s.saved} if s else None for s in seen]
         try:
             def write():
                 actor = self._ensure_actor(event)
                 self.core.record(Episode(
                     kind="message_in", content=text, space=space, source=event.get_platform_name() or "astrbot",
-                    actor=actor, meta={"message_id": str(getattr(event.message_obj, "message_id", "") or "")}))
+                    actor=actor, meta=meta))
             await asyncio.to_thread(write)
         except Exception as exc:
             logger.warning(f"[memory-core] failed to record message: {exc}")
+
+    # ---------------------------------------------------------------- seeing pictures
+
+    def _viewers(self, loop: asyncio.AbstractEventLoop) -> list:
+        """The vision providers in vision_providers, in order (a later one is used when an earlier one fails)."""
+        timeout = float(self.cfg.get("vision_timeout", 120))
+        viewers = []
+        for pid in self.cfg.get("vision_providers", []) or []:
+            pid = str(pid).strip()
+            provider = self.context.get_provider_by_id(pid) if pid else None
+            if provider is None:
+                continue
+
+            def see(jpeg: bytes, prompt: str, provider=provider) -> str:
+                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+                    f.write(jpeg)
+                    path = f.name
+                try:
+                    coro = provider.text_chat(prompt=prompt, image_urls=[path])
+                    resp = asyncio.run_coroutine_threadsafe(coro, loop).result(timeout)
+                    return resp.completion_text or ""
+                finally:
+                    Path(path).unlink(missing_ok=True)
+
+            viewers.append((pid, see))
+        return viewers
+
+    @staticmethod
+    def _pictures(event: AstrMessageEvent) -> list:
+        """Pictures in the message, then pictures in the message it quotes."""
+        chain = list(getattr(event.message_obj, "message", None) or [])
+        own = [c for c in chain if isinstance(c, Image)]
+        quoted = [c for r in chain if isinstance(r, Reply) for c in (r.chain or []) if isinstance(c, Image)]
+        return own + quoted
+
+    async def _see(self, event: AstrMessageEvent, owner: bool) -> list[Seen | None]:
+        """Look at the pictures in this message (once each; the same picture is remembered by its content).
+        Saved on the event for the reply. Never raises."""
+        if not self.cfg.get("vision_enabled", True) or not self.cfg.get("vision_providers"):
+            return []
+        pictures = self._pictures(event)
+        if not pictures:
+            return []
+        own = sum(1 for c in getattr(event.message_obj, "message", None) or [] if isinstance(c, Image))
+        pictures = pictures[: max(1, int(self.cfg.get("vision_max_images", 4)))]
+        keep = str(self.cfg.get("vision_keep_pictures", "owner"))
+        save = keep == "all" or (keep == "owner" and owner)
+        viewers = self._viewers(asyncio.get_running_loop())
+        seen: list[Seen | None] = []
+        for i, comp in enumerate(pictures):
+            try:
+                data = Path(await comp.convert_to_file_path()).read_bytes()
+                errors: list[str] = []
+                s = await asyncio.to_thread(look, self.core, data, viewers, save=save and i < own, errors=errors)
+                if s is None:
+                    logger.warning(f"[memory-core] could not see a picture: {'; '.join(errors) or 'no vision provider'}")
+            except Exception as exc:  # noqa: BLE001 - a picture she cannot see is not an error for the chat
+                logger.warning(f"[memory-core] could not read a picture: {exc}")
+                s = None
+            seen.append(s)
+        event.set_extra("memory_core_seen", seen)
+        logger.info(f"[memory-core] saw {sum(1 for s in seen if s)}/{len(seen)} pictures "
+                    f"({sum(1 for s in seen if s and s.cached)} remembered)")
+        return seen[:own] if own else seen
+
+    def _main_sees_pictures(self, event: AstrMessageEvent) -> bool:
+        try:
+            provider = self.context.get_using_provider(umo=event.unified_msg_origin)
+            modalities = provider.provider_config.get("modalities") if provider else None
+            return isinstance(modalities, list) and "image" in modalities
+        except Exception:  # noqa: BLE001
+            return False
 
     @filter.on_llm_response()
     async def on_reply(self, event: AstrMessageEvent, resp: LLMResponse):
@@ -267,9 +352,15 @@ class MemoryCorePlugin(star.Star):
                 await asyncio.to_thread(self._apply_identity, event, req)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[memory-core] identity injection failed: {exc}")
+        seen = event.get_extra("memory_core_seen") or []
+        if seen and req.image_urls and not self._main_sees_pictures(event):
+            # the chat model is text-only: it gets what she saw instead of the pictures
+            req.image_urls = []
+            req.extra_user_content_parts.append(TextPart(text=caption_block(seen)))
         if not self.cfg.get("inject_memories", True):
             return
-        query = (req.prompt or event.get_message_str() or "").strip()
+        query = (event.get_message_str() or "").strip() or " ".join(s.text for s in seen if s)
+        query = query or (req.prompt or "").strip()
         if not query:
             return
         space, _, owner = self._where(event)

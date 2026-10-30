@@ -151,6 +151,40 @@
     "default": true,
     "hint": "Before each reply: how long since the owner was here, today's visits and outings, energy by the hour, longing for the owner, and a mood judged after each quiet conversation. Things about the owner are only shown in the owner's private chat."
   },
+  "vision_enabled": {
+    "description": "See pictures",
+    "type": "bool",
+    "default": true,
+    "hint": "Pictures in messages are described by a vision model, the being reacts to the description and remembers it. Needs vision_providers."
+  },
+  "vision_providers": {
+    "description": "Vision providers, in order",
+    "type": "list",
+    "default": [],
+    "hint": "AstrBot provider IDs that accept images (e.g. a local Ollama qwen3-vl). The next one is tried when one fails; the same picture is only looked at once. Leave AstrBot's own image caption provider empty, or pictures are described twice."
+  },
+  "vision_keep_pictures": {
+    "description": "Keep the pictures themselves",
+    "type": "string",
+    "default": "owner",
+    "options": [
+      "owner",
+      "all",
+      "none"
+    ],
+    "hint": "owner: only pictures from the owner's private chat are kept in attachments/images (at most 2 MB each). The description is always remembered."
+  },
+  "vision_max_images": {
+    "description": "Pictures looked at per message",
+    "type": "int",
+    "default": 4
+  },
+  "vision_timeout": {
+    "description": "Seconds to wait for one picture",
+    "type": "int",
+    "default": 120,
+    "hint": "A local model loading for the first time can take a minute."
+  },
   "mood_idle_minutes": {
     "description": "Judge the mood after N quiet minutes",
     "type": "int",

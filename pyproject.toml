@@ -26,7 +26,9 @@ dependencies = ["numpy>=1.24"]
 [project.optional-dependencies]
 # Better Chinese word segmentation for full-text search (falls back to character n-grams without it).
 zh = ["jieba>=0.42"]
-dev = ["pytest>=8"]
+# Seeing pictures: normalize them (first frame, JPEG, size) before a vision model looks.
+vision = ["pillow>=10"]
+dev = ["pytest>=8", "pillow>=10"]
 
 [project.urls]
 Repository = "https://github.com/JikunLiu101/memory-core"
