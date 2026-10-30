@@ -35,7 +35,7 @@ person (`owner_name`) on every platform; their private chats get the `owner` sco
 
 ```bash
 # in AstrBot's Python environment
-pip install "memory-core @ git+https://github.com/JikunLiu101/memory-core@v0.3.0"
+pip install "memory-core @ git+https://github.com/JikunLiu101/memory-core@v0.4.0"
 ```
 
 Copy `astrbot_plugin_memory_core/` into AstrBot's `data/plugins/`, restart AstrBot, then set at least

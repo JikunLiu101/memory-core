@@ -1,12 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-10-30)
 
 - Public spaces (`[spaces] public` in config.toml, default `["web"]`): what the being saw there on its own becomes
   `public` memories; memories drawn from its own thoughts there stay `owner`. The diary calls it "上网".
 - AstrBot adapter: the memory guide states when the diary is written and that memories are tidied afterwards;
   every `/mem_` command needs the owner, in a private chat, on `owner_command_platforms` (default: webchat);
   `identity_propose` only works in the owner's private chat.
+- Removed a default AstrBot config (`data/`) that had been committed by mistake; it held no keys or accounts.
 
 ## 0.3.0 (2026-10-30)
 

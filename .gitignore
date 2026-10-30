@@ -11,3 +11,5 @@ soul-*/
 *.db
 *.db-wal
 *.db-shm
+# AstrBot creates data/ in the working directory when it is imported (e.g. adapter checks)
+data/

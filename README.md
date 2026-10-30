@@ -4,8 +4,9 @@
 
 A local-first, framework-agnostic long-term memory core for AI companions.
 
-> Status: **pre-alpha (M1)**. Storage, hybrid recall, the bundle format, LLM consolidation, an MCP server and an
-> AstrBot adapter work and are tested. Reflection, decay and hard forgetting are next. APIs may change.
+> Status: **pre-alpha (M2)**. Storage, hybrid recall, the bundle format, LLM consolidation, an MCP server, an
+> AstrBot adapter, the daily diary and self-image, and memory metabolism (fading, merging, hard forgetting) work and
+> are tested. APIs may change.
 
 ## Why
 
@@ -176,7 +177,7 @@ what is visible there.
 | M1 ✅ | Consolidation (add / update / supersede, entity aliases), MCP server, AstrBot adapter |
 | M2 ✅ | Diary and self-image (0.2.0); fading and archiving (0.3.0), merging duplicates, hard forget along provenance, identity proposals |
 | M3 | Public benchmarks (LoCoMo, LongMemEval), docs |
-| M4 | Experience collectors: browser, video sites |
+| M4 🔄 | Experience collectors: public spaces (0.4.0) and [surfing-the-web](https://github.com/JikunLiu101/surfing-the-web) (reading public sites on its own); next: a real browser, video sites |
 | M5 | Lexicon (slang/meme) learning, style learning, identity proposals with rollback, inner monologue |
 
 ## Acknowledgements

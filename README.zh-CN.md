@@ -4,7 +4,7 @@
 
 给 AI 伙伴用的长期记忆核心：数据存在本地，不绑定任何框架。
 
-> 状态：**预览版（M1）**。存储、混合回忆、导出格式、用大模型整理记忆、MCP 服务和 AstrBot 适配器都已可用并有测试；反思、衰减和彻底遗忘是下一步。接口可能还会变。
+> 状态：**预览版（M2）**。存储、混合回忆、导出格式、用大模型整理记忆、MCP 服务、AstrBot 适配器、每日日记与自我认知、记忆的新陈代谢（淡忘、合并、彻底遗忘）都已可用并有测试。接口可能还会变。
 
 ## 为什么做
 
@@ -56,7 +56,7 @@ model = "bge-m3"
 
 ## 整理、MCP、适配器
 
-- **整理**：在 `soul/config.toml` 里配置 `[llm]`（任何兼容 OpenAI 接口的模型，Key 放在环境变量里，用 `api_key_env` 指定），然后运行 `memory-core consolidate ./soul`。模型看到新消息和已有的相关记忆后，提出新增、更新（旧记忆保留并标记为已取代）或不动。**模型只负责提议，可见范围由代码决定**：关于人的记忆只留在学到它的那个场所（或主人私聊），只有不涉及任何人的内容才能公开。
+- **整理**：在 `soul/config.toml` 里配置 `[llm]`（任何兼容 OpenAI 接口的模型，Key 放在环境变量里，用 `api_key_env` 指定），然后运行 `memory-core consolidate ./soul`。模型看到新消息和已有的相关记忆后，提出新增、更新（旧记忆保留并标记为已取代）或不动。**模型只负责提议，可见范围由代码决定**：关于人的记忆只留在学到它的那个场所（或主人私聊），只有不涉及任何人的内容才能公开。**公开场所**（`[spaces] public`，默认 `["web"]`，例如用 [surfing-the-web](https://github.com/JikunLiu101/surfing-the-web) 自己上网看到的）里看到的内容会公开，从它自己的想法整理出的记忆只给主人。
 - **MCP 服务**：`memory-core mcp ./soul`（只读加 `--read-only`），Claude Code 等任何 MCP 客户端都能共用同一份记忆。
 - **AstrBot 适配器**：见 [`adapters/astrbot`](adapters/astrbot/README.md)。
 
