@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- What the being can do (`memory_core.abilities`): the host lists the being's abilities (a stable key, a short
+  verb-phrase name, one line on how it works); the list goes into the prompt, and anything not on it is something
+  the being cannot do yet. The last known list is kept in the store: a new ability is marked new for a while
+  (`fresh_hours`) and the being notices it once, a lost one too. AstrBot adapter: the list is collected from the
+  active plugins (a plugin describes itself with `being_abilities(owner)` returning (key, name, text) tuples;
+  otherwise its description and its tools are used); in the owner's private chat a change is recorded as the
+  being's own thought there, so it reaches its memory and diary. Settings `abilities_enabled`,
+  `abilities_fresh_hours`.
 - Seeing pictures (`memory_core.vision`, prompt `vision-v1`): a vision model describes each picture plainly (what
   kind of picture, what is in it, its text word for word); the description is cached by the picture's content, so
   the same sticker is looked at once. Viewers are tried in order (a local model first, a remote one as a fallback).

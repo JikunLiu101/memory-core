@@ -9,6 +9,7 @@
   the being can only propose changes to its core identity, the owner approves
 - gives the model `memory_recall` / `memory_remember` tools
 - sees pictures through a vision model (cached by content) and remembers what was in them
+- tells the being what it can do (collected from the installed plugins) and lets it notice new abilities
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from astrbot.core.agent.message import TextPart
 
 from memory_core import Audience, Episode, Memory, MemoryCore
 from memory_core import timeutil
+from memory_core.abilities import Ability, abilities_block, gained_note, lost_note, notice
 from memory_core.consolidate import due_spaces, remember
 from memory_core.metabolism import fade, merge_duplicates
 from memory_core.now import describe, mood_due, snapshot, update_mood
@@ -308,6 +310,13 @@ class MemoryCorePlugin(star.Star):
         block = identity_block(docs, guide=guide)
         if not block:
             return
+        if self.cfg.get("abilities_enabled", True):
+            try:
+                can = self._abilities_block(event)
+                if can:
+                    block = f"{block}\n\n{can}"
+            except Exception as exc:  # noqa: BLE001 - never block a reply
+                logger.warning(f"[memory-core] abilities failed: {exc}")
         system = req.system_prompt or ""
         if self.cfg.get("replace_framework_persona", True):
             system = strip_framework_persona(system, self._framework_persona_prompt(event), (_WEBCHAT_DEFAULT,))
@@ -322,6 +331,76 @@ class MemoryCorePlugin(star.Star):
             except Exception as exc:  # noqa: BLE001 - never block a reply
                 logger.warning(f"[memory-core] inner state failed: {exc}")
         req.system_prompt = f"{block}\n\n{system.strip()}\n\n{now_note}{note}\n"
+
+    # ---------------------------------------------------------------- what she can do
+
+    def being_abilities(self, owner: str) -> list[Ability]:
+        """This plugin's own abilities. Other plugins offer theirs with a method of the same name."""
+        out = [Ability("memory-core:memory", "记事和翻找记忆",
+                       "聊过的事会自己记下来；想不起来用 memory_recall 翻找，要紧的事用 memory_remember 记牢")]
+        if self.cfg.get("diary_enabled", True):
+            out.append(Ability("memory-core:diary", "写日记",
+                               f"每天凌晨{int(self.cfg.get('diary_hour', 4))}点左右自动回顾前一天写一篇，只有{owner}能看"))
+        if self.cfg.get("vision_enabled", True) and any(
+                self.context.get_provider_by_id(str(p).strip()) for p in self.cfg.get("vision_providers", []) or []):
+            out.append(Ability("memory-core:vision", "看图",
+                               "别人发来的图片（包括引用的消息里的）会先被讲成一段话给你，你就知道图里有什么；"
+                               "动图只看第一帧，看不清的会告诉你，别编"))
+        out.append(Ability("memory-core:identity", "提议改自己的设定",
+                           f"真想改核心身份的某一点（比如给自己取了名字），和{owner}私聊时用 identity_propose 提议，"
+                           f"等{owner}同意"))
+        return out
+
+    def _abilities(self) -> list[Ability]:
+        """Every active plugin's abilities: its being_abilities() if it has one, otherwise (a plugin made for
+        anyone) its description and the tools it gives the model."""
+        owner = self.owner_title
+        out = list(self.being_abilities(owner))
+        tools: dict[str, list] = {}
+        try:
+            for tool in self.context.get_llm_tool_manager().func_list:
+                if getattr(tool, "active", True) and getattr(tool, "handler_module_path", None):
+                    tools.setdefault(tool.handler_module_path, []).append(tool)
+        except Exception:  # noqa: BLE001
+            pass
+        for meta in self.context.get_all_stars():
+            plugin = getattr(meta, "star_cls", None)
+            if plugin is None or plugin is self or not getattr(meta, "activated", True) or meta.reserved:
+                continue
+            own = getattr(plugin, "being_abilities", None)
+            if callable(own):
+                try:
+                    for a in own(owner) or []:
+                        if isinstance(a, Ability):
+                            out.append(a)
+                        elif isinstance(a, (tuple, list)) and len(a) == 3:  # plugins need not import memory-core
+                            out.append(Ability(*(str(x) for x in a)))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"[memory-core] {meta.name}.being_abilities failed: {exc}")
+                continue
+            mine = tools.get(meta.module_path or "", [])
+            if not mine:
+                continue  # changes how she behaves, not what she can do
+            names = "、".join(t.name for t in mine)
+            desc = (meta.short_desc or meta.desc or "").strip().splitlines()
+            label = meta.display_name or meta.name
+            text = f"{desc[0]}（工具：{names}）" if desc else f"工具：{names}"
+            out.append(Ability(f"plugin:{meta.name}", f"用「{label}」", text))
+        return out
+
+    def _abilities_block(self, event: AstrMessageEvent) -> str:
+        """The list for the prompt. In the owner's private chat she also notices what changed (once), as a
+        thought in that chat, so it reaches her memory and her diary."""
+        current = self._abilities()
+        space, _, owner = self._where(event)
+        noticed = notice(self.core, current, fresh_hours=float(self.cfg.get("abilities_fresh_hours", 24)),
+                         update=owner)
+        if owner:
+            for a, note in [(a, gained_note(a)) for a in noticed.gained] + [(a, lost_note(a)) for a in noticed.lost]:
+                self.core.record(Episode(kind="thought", content=note, space=space, source="memory-core",
+                                         actor=SELF_ALIAS, meta={"ability": a.key}))
+                logger.info(f"[memory-core] she noticed: {note}")
+        return abilities_block(current, noticed, self.owner_title)
 
     def _owner_spaces(self) -> list[str]:
         return owner_spaces(self.core.store.space_heads().keys(), self.owner_ids)

@@ -151,6 +151,17 @@
     "default": true,
     "hint": "Before each reply: how long since the owner was here, today's visits and outings, energy by the hour, longing for the owner, and a mood judged after each quiet conversation. Things about the owner are only shown in the owner's private chat."
   },
+  "abilities_enabled": {
+    "description": "Tell the being what it can do",
+    "type": "bool",
+    "default": true,
+    "hint": "Lists what the installed plugins let the being do (a plugin can describe itself with being_abilities(owner); otherwise its description and tools are used). In the owner's private chat the being notices a new or a lost ability once and remembers it."
+  },
+  "abilities_fresh_hours": {
+    "description": "Hours a new ability is marked new",
+    "type": "int",
+    "default": 24
+  },
   "vision_enabled": {
     "description": "See pictures",
     "type": "bool",
