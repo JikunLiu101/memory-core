@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import tempfile
 import time
 from datetime import date, timedelta
@@ -58,6 +59,11 @@ except Exception:  # noqa: BLE001 - internal name, may move between AstrBot vers
     _WEBCHAT_DEFAULT = ""
 
 PLUGIN_NAME = "astrbot_plugin_memory_core"
+
+
+def _no_urls(text) -> str:
+    """Errors about pictures can carry their URL, and some platforms put a token in it (Telegram)."""
+    return re.sub(r"https?://\S+", "<url>", str(text))
 
 
 class AstrBotLLM:
@@ -241,9 +247,10 @@ class MemoryCorePlugin(star.Star):
                 errors: list[str] = []
                 s = await asyncio.to_thread(look, self.core, data, viewers, save=save and i < own, errors=errors)
                 if s is None:
-                    logger.warning(f"[memory-core] could not see a picture: {'; '.join(errors) or 'no vision provider'}")
+                    logger.warning(f"[memory-core] could not see a picture: "
+                                   f"{_no_urls('; '.join(errors)) or 'no vision provider'}")
             except Exception as exc:  # noqa: BLE001 - a picture she cannot see is not an error for the chat
-                logger.warning(f"[memory-core] could not read a picture: {exc}")
+                logger.warning(f"[memory-core] could not read a picture: {_no_urls(exc)}")
                 s = None
             seen.append(s)
         event.set_extra("memory_core_seen", seen)
