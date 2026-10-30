@@ -61,3 +61,20 @@ def test_speaker_note():
     assert "主人本人" in logic.speaker_note(True, "主人", "x", False)
     note = logic.speaker_note(False, "主人", "阿明", True)
     assert "阿明" in note and "不是主人" in note and "群聊" in note
+
+
+def test_memory_guide_states_the_daily_schedule():
+    guide = logic.memory_guide("老板", 5)
+    assert "凌晨5点" in guide and "老板能看" in guide and "整理一次记忆" in guide
+    assert "日记" not in logic.memory_guide(diary=False, tidy=False).split("memory_remember")[1]
+    assert "每天凌晨4点左右还会整理" in logic.memory_guide(diary=False)
+
+
+def test_owner_console_only_owner_private_on_listed_platform():
+    owners, web = ["astrbot", "10001"], ["webchat"]
+    assert logic.owner_console("webchat", False, "astrbot", owners, web)
+    assert not logic.owner_console("webchat", True, "astrbot", owners, web)        # a group
+    assert not logic.owner_console("webchat", False, "stranger", owners, web)      # someone else
+    assert not logic.owner_console("aiocqhttp", False, "10001", owners, web)       # owner, unlisted platform
+    assert logic.owner_console("aiocqhttp", False, "10001", owners, web + ["aiocqhttp"])
+    assert not logic.owner_console(None, False, "astrbot", owners, [])

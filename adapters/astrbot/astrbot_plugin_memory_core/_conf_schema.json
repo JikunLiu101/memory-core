@@ -11,6 +11,14 @@
     "default": [],
     "hint": "Sender IDs of the owner. Private chats with them get the 'owner' scope; their content is never brought up elsewhere."
   },
+  "owner_command_platforms": {
+    "description": "Platforms where the owner may use the memory commands",
+    "type": "list",
+    "default": [
+      "webchat"
+    ],
+    "hint": "/mem_forget, /mem_approve and the other /mem_ commands only work for the owner, in a private chat, on these platforms (default: only AstrBot's local web chat). Everyone else, and every group, gets no answer. Add a chat platform here only if you really need it."
+  },
   "owner_name": {
     "description": "How the being refers to its owner",
     "type": "string",
@@ -31,7 +39,9 @@
   "skip_prefixes": {
     "description": "Do not record messages starting with",
     "type": "list",
-    "default": ["/"],
+    "default": [
+      "/"
+    ],
     "hint": "Commands are not experiences."
   },
   "record_messages": {

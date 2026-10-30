@@ -39,6 +39,7 @@ from .logic import (
     is_owner_private,
     memory_block,
     memory_guide,
+    owner_console,
     owner_spaces,
     space_of,
     speaker_note,
@@ -76,6 +77,7 @@ class MemoryCorePlugin(star.Star):
         root = (self.cfg.get("soul_dir") or "").strip()
         self.root = Path(root) if root else Path(star.StarTools.get_data_dir(PLUGIN_NAME)) / "soul"
         self.owner_ids = [str(x) for x in self.cfg.get("owner_ids", []) if str(x).strip()]
+        self.console_platforms = [str(x) for x in self.cfg.get("owner_command_platforms", ["webchat"])]
         self.owner_name = (self.cfg.get("owner_name") or "主人").strip()
         # what the being calls its owner in prompts (e.g. 爸爸); defaults to owner_name
         self.owner_title = (self.cfg.get("owner_title") or "").strip() or self.owner_name
@@ -119,6 +121,18 @@ class MemoryCorePlugin(star.Star):
         sender = str(event.get_sender_id())
         space = space_of(event.get_platform_name(), is_group, event.get_group_id(), sender)
         return space, is_group, is_owner_private(is_group, sender, self.owner_ids)
+
+    def _console_denied(self, event: AstrMessageEvent) -> bool:
+        """The memory commands change or reveal private memory: only the owner, in a private chat, on a
+        platform listed in owner_command_platforms. Anyone else gets no answer at all (and no LLM reply)."""
+        is_group = bool(event.get_group_id())
+        if owner_console(event.get_platform_name(), is_group, str(event.get_sender_id()), self.owner_ids,
+                         self.console_platforms):
+            return False
+        logger.warning(f"[memory-core] refused {event.get_message_str()!r} from {event.get_platform_name()}:"
+                       f"{event.get_sender_id()} (group={is_group})")
+        event.stop_event()
+        return True
 
     def _ensure_actor(self, event: AstrMessageEvent) -> str:
         alias = actor_alias(event.get_platform_name(), str(event.get_sender_id()))
@@ -194,7 +208,10 @@ class MemoryCorePlugin(star.Star):
         """The being's identity documents go first in the system prompt (stable, so cached);
         who is speaking goes last (it changes per sender)."""
         docs = [(tag, self.core.identity(name)) for name, tag in IDENTITY_DOCS]
-        block = identity_block(docs, guide=memory_guide(self.owner_title))
+        guide = memory_guide(self.owner_title, int(self.cfg.get("diary_hour", 4)),
+                             diary=bool(self.cfg.get("diary_enabled", True)),
+                             tidy=bool(self.cfg.get("tidy_enabled", True)))
+        block = identity_block(docs, guide=guide)
         if not block:
             return
         system = req.system_prompt or ""
@@ -263,7 +280,9 @@ class MemoryCorePlugin(star.Star):
             return "memory is not available"
         space, _, owner = self._where(event)
         if not owner:
-            reason = f"{reason}（在 {space} 提出）".strip()
+            # Only the owner shapes who she is: what others say must not become a proposal.
+            logger.info(f"[memory-core] identity_propose refused outside the owner's private chat ({space})")
+            return f"改变自己的事只能私下和{self.owner_title}商量，现在不能提"
         p = await asyncio.to_thread(propose, self.core, text, reason)
         logger.info(f"[memory-core] identity proposal {p.id}: {text}")
         return f"提议已记下（编号 {p.id[-6:]}），要等{self.owner_title}同意才会生效"
@@ -400,6 +419,8 @@ class MemoryCorePlugin(star.Star):
     @filter.command("mem_diary")
     async def cmd_diary(self, event: AstrMessageEvent):
         """让她现在就写今天的日记（会覆盖今天已写的）"""
+        if self._console_denied(event):
+            return
         day = current_day(timeutil.now(), int(self.cfg.get("diary_hour", 4)))
         try:
             diary, image = await self.reflect_day(day, force=True)
@@ -422,6 +443,8 @@ class MemoryCorePlugin(star.Star):
     @filter.command("mem_tidy")
     async def cmd_tidy(self, event: AstrMessageEvent):
         """整理记忆：淡化的归档、重复的合并"""
+        if self._console_denied(event):
+            return
         try:
             s = await self.tidy()
         except Exception as exc:
@@ -434,6 +457,8 @@ class MemoryCorePlugin(star.Star):
     @filter.command("mem_forget")
     async def cmd_forget(self, event: AstrMessageEvent):
         """找出要遗忘的记忆：/mem_forget 关键词"""
+        if self._console_denied(event):
+            return
         query = self._args(event)
         if not query:
             yield event.plain_result("用法：/mem_forget 关键词，列出相关记忆后用 /mem_forget_do 编号 遗忘")
@@ -454,6 +479,8 @@ class MemoryCorePlugin(star.Star):
     @filter.command("mem_forget_do")
     async def cmd_forget_do(self, event: AstrMessageEvent):
         """彻底遗忘 /mem_forget 列出的记忆：/mem_forget_do 1 3"""
+        if self._console_denied(event):
+            return
         candidates = self._forget_candidates.get(str(event.get_sender_id()), [])
         try:
             picks = sorted({int(x) for x in self._args(event).replace(",", " ").split()})
@@ -483,6 +510,8 @@ class MemoryCorePlugin(star.Star):
     @filter.command("mem_proposals")
     async def cmd_proposals(self, event: AstrMessageEvent):
         """她对核心身份的修改提议"""
+        if self._console_denied(event):
+            return
         pending = await asyncio.to_thread(proposals, self.core)
         if not pending:
             yield event.plain_result("没有待处理的提议")
@@ -503,18 +532,24 @@ class MemoryCorePlugin(star.Star):
     @filter.command("mem_approve")
     async def cmd_approve(self, event: AstrMessageEvent):
         """同意她的提议：/mem_approve 编号"""
+        if self._console_denied(event):
+            return
         yield event.plain_result(await self._resolve(event, True))
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("mem_reject")
     async def cmd_reject(self, event: AstrMessageEvent):
         """拒绝她的提议：/mem_reject 编号"""
+        if self._console_denied(event):
+            return
         yield event.plain_result(await self._resolve(event, False))
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("mem_status")
     async def cmd_status(self, event: AstrMessageEvent):
         """memory-core 状态"""
+        if self._console_denied(event):
+            return
         stats = await asyncio.to_thread(self.core.stats)
         pending = await asyncio.to_thread(self.core.pending_consolidation)
         yield event.plain_result(
@@ -526,6 +561,8 @@ class MemoryCorePlugin(star.Star):
     @filter.command("mem_consolidate")
     async def cmd_consolidate(self, event: AstrMessageEvent):
         """立即整理记忆"""
+        if self._console_denied(event):
+            return
         try:
             summary = await self.consolidate_now(force=True)
         except Exception as exc:

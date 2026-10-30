@@ -13,8 +13,8 @@ gives the bot a long-term memory backed by memory-core.
 | Every `consolidate_interval_minutes` | chats with at least `consolidate_min_new` new messages are consolidated with AstrBot's own chat model |
 | Every day after `diary_hour` | the being writes the previous day's diary in its own voice (an owner-only memory, also saved as `diary/<date>.md`) and rewrites `identity/self-image.md` from its recent diaries (old versions go to `identity/history/`) |
 | Once a day, after the diary | memory metabolism: faded memories are archived, duplicates merged (`tidy_enabled`, `archive_below`) |
-| Model tools | `memory_recall(query)` (also finds faded memories, which brings them back), `memory_remember(text, kind)`, `identity_propose(text, reason)` (a change to the core identity, waits for the owner) |
-| Admin commands | `/mem_status`, `/mem_consolidate` (runs now, for every chat with new messages), `/mem_diary` (writes today's diary now), `/mem_tidy` (metabolism now), `/mem_forget <words>` then `/mem_forget_do <numbers>` (hard forget, with the source messages; affected diaries are rewritten), `/mem_proposals`, `/mem_approve <id>`, `/mem_reject <id>` |
+| Model tools | `memory_recall(query)` (also finds faded memories, which brings them back), `memory_remember(text, kind)`, `identity_propose(text, reason)` (a change to the core identity, waits for the owner; only in the owner's private chat, so nobody else can talk it into one). There is no tool to delete memories |
+| Owner commands (only the owner, in a private chat, on a platform in `owner_command_platforms`, default only the local `webchat`; anyone else and every group gets no answer) | `/mem_status`, `/mem_consolidate` (runs now, for every chat with new messages), `/mem_diary` (writes today's diary now), `/mem_tidy` (metabolism now), `/mem_forget <words>` then `/mem_forget_do <numbers>` (hard forget, with the source messages; affected diaries are rewritten), `/mem_proposals`, `/mem_approve <id>`, `/mem_reject <id>` |
 
 ### Identity documents
 
