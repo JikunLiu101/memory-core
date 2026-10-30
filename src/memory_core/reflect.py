@@ -106,6 +106,8 @@ def _transcript(core, episodes, owner_spaces: set[str], owner: str) -> str:
             where = f"和{owner}私聊"
         elif ":group:" in ep.space:
             where = "群聊"
+        elif ep.space == "web" or ep.space.startswith("web:"):
+            where = "上网"
         else:
             where = ep.space
         kind = "" if ep.kind in (EpisodeKind.MESSAGE_IN, EpisodeKind.MESSAGE_OUT) else f"（{ep.kind}）"

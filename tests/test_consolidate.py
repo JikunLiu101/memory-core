@@ -129,3 +129,22 @@ def test_consolidate_needs_llm(tmp_path):
     with MemoryCore.open(tmp_path / "s", embedder=None) as c:
         with pytest.raises(RuntimeError):
             c.consolidate()
+
+
+def test_what_it_saw_online_is_public_what_it_thought_is_owners(core):
+    core.ensure_entity("self", name="我")
+    core.record(Episode(kind="observation", content="在B站看到《星露谷新版本》", space="web", source="web"))
+    core.record(Episode(kind="thought", content="想和主人一起玩", space="web", source="web", actor="self"))
+    llm = FakeLLM({"memories": [
+        {"op": "add", "kind": "event", "text": "我在B站看到星露谷出了新版本", "subjects": [], "evidence": ["M1"]},
+        {"op": "add", "kind": "preference", "text": "我想和主人一起玩星露谷", "subjects": ["我"],
+         "evidence": ["M1", "M2"], "visibility": "self"},
+        {"op": "add", "kind": "fact", "text": "星露谷是农场游戏", "subjects": []},  # no evidence: all of them
+    ]})
+    report = core.consolidate(llm)
+    saw, felt, unsure = (core.memory(i) for i in report.added)
+    assert saw.scope == "public" and felt.scope == "owner" and unsure.scope == "owner"
+    assert not core.recall("一起玩", Audience(G1), reinforce=False)  # not in a group
+    assert "(public:" in llm.calls[0][1]
+    # it comes up in a private chat as well
+    assert core.recall("星露谷", Audience(DM, owner_present=True), reinforce=False)

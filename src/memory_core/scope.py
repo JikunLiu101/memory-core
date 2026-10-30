@@ -16,6 +16,8 @@ PUBLIC = "public"
 SELF = "self"
 OWNER = "owner"
 SPACE_PREFIX = "space:"
+# Places where nothing private happens; memories learned there are public. "web": what the being read online.
+DEFAULT_PUBLIC_SPACES = ("web",)
 
 
 def space_scope(space: str) -> str:

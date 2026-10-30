@@ -23,7 +23,7 @@ from . import timeutil
 from .embed import Embedder, embedder_from_config
 from .ids import new_id
 from .models import Entity, EntityKind, Episode, EpisodeKind, Memory, MemoryKind, MemoryStatus, RecallHit
-from .scope import Audience, validate_scope
+from .scope import DEFAULT_PUBLIC_SPACES, Audience, validate_scope
 from .store import Store
 from .text import Tokenizer, fts_document, fts_query, get_tokenizer
 
@@ -536,8 +536,9 @@ class MemoryCore:
 
     # ---------------------------------------------------------------- consolidation
 
-    def consolidate(self, llm=None, *, spaces=None, owner_spaces=None, **kwargs):
-        """Turn pending episodes into memories. `llm` defaults to [llm] in config.toml."""
+    def consolidate(self, llm=None, *, spaces=None, owner_spaces=None, public_spaces=None, **kwargs):
+        """Turn pending episodes into memories. `llm` defaults to [llm] in config.toml; `public_spaces` to
+        [spaces] public in config.toml, or ["web"]."""
         from .consolidate import consolidate  # noqa: PLC0415
         from .llm import llm_from_config  # noqa: PLC0415
 
@@ -546,7 +547,10 @@ class MemoryCore:
             raise RuntimeError("no LLM configured (pass llm= or add [llm] to config.toml)")
         if owner_spaces is None:
             owner_spaces = self.config.get("owner", {}).get("spaces", [])
-        return consolidate(self, llm, spaces=spaces, owner_spaces=owner_spaces, **kwargs)
+        if public_spaces is None:
+            public_spaces = self.config.get("spaces", {}).get("public", list(DEFAULT_PUBLIC_SPACES))
+        return consolidate(self, llm, spaces=spaces, owner_spaces=owner_spaces, public_spaces=public_spaces,
+                           **kwargs)
 
     def pending_consolidation(self, min_new: int = 1) -> dict[str, int]:
         from .consolidate import pending  # noqa: PLC0415

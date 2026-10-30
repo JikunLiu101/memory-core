@@ -82,9 +82,15 @@ def pending(core, min_new: int = 1) -> dict[str, int]:
 
 
 def consolidate(core, llm: LLM, *, spaces: Iterable[str] | None = None, owner_spaces: Iterable[str] = (),
-                batch_size: int = 40, max_batches: int = 10, min_new: int = 1) -> ConsolidationReport:
-    """Consolidate pending episodes. The cursor of a space only advances after its batch was applied."""
+                public_spaces: Iterable[str] = (), batch_size: int = 40, max_batches: int = 10,
+                min_new: int = 1) -> ConsolidationReport:
+    """Consolidate pending episodes. The cursor of a space only advances after its batch was applied.
+
+    `public_spaces` are places where nothing private happens (e.g. "web", what the being read online on its
+    own): what it saw there becomes `public` memories it can bring up anywhere; memories drawn from its own
+    thoughts there are `owner` (shared with the owner only)."""
     owner_spaces = set(owner_spaces)
+    public_spaces = set(public_spaces) - owner_spaces
     targets = list(spaces) if spaces is not None else list(pending(core, min_new))
     report = ConsolidationReport()
     for space in targets:
@@ -93,7 +99,8 @@ def consolidate(core, llm: LLM, *, spaces: Iterable[str] | None = None, owner_sp
             batch = core.store.episodes_after(space, cursor, batch_size)
             if len(batch) < min_new or not batch:
                 break
-            part = _consolidate_batch(core, llm, space, [ep for _, ep in batch], space in owner_spaces)
+            part = _consolidate_batch(core, llm, space, [ep for _, ep in batch], space in owner_spaces,
+                                      space in public_spaces)
             core.store.set_meta(_CURSOR + space, str(batch[-1][0]))
             report.merge(part)
             if len(batch) < batch_size:
@@ -102,7 +109,7 @@ def consolidate(core, llm: LLM, *, spaces: Iterable[str] | None = None, owner_sp
 
 
 def _consolidate_batch(core, llm: LLM, space: str, episodes: list[Episode],
-                       owner_private: bool) -> ConsolidationReport:
+                       owner_private: bool, public: bool = False) -> ConsolidationReport:
     me = core.ensure_entity(SELF_ALIAS, name="我")
     labels_p: dict[str, str] = {}  # P-label -> entity id
     entity_label: dict[str, str] = {}
@@ -138,7 +145,8 @@ def _consolidate_batch(core, llm: LLM, space: str, episodes: list[Episode],
     labels_e = {f"E{i + 1}": hit.memory for i, hit in enumerate(existing)}
 
     user = "\n".join([
-        f"Place: {space}{' (private chat with my owner)' if owner_private else ''}",
+        f"Place: {space}{' (private chat with my owner)' if owner_private else ''}"
+        f"{' (public: what I saw or did on my own, not a conversation)' if public else ''}",
         "Participants:", *(roster_lines or ["(none besides me)"]),
         "", "Existing memories:", *([f"{k}: {m.text}" for k, m in labels_e.items()] or ["(none)"]),
         "", "New messages:", *transcript,
@@ -149,11 +157,15 @@ def _consolidate_batch(core, llm: LLM, space: str, episodes: list[Episode],
         raise ValueError("'memories' must be a list")
 
     report = ConsolidationReport(episodes=len(episodes), spaces=[space])
-    base_scope = OWNER if owner_private else space_scope(space)
+    base_scope = OWNER if owner_private else PUBLIC if public else space_scope(space)
+    # In a public place, what the being saw is public, but what it thought there is its own inner life
+    # (it may well be about its owner): memories drawn from its own thoughts stay with the owner.
+    own = {ep.id for ep in episodes if ep.kind in (EpisodeKind.THOUGHT, EpisodeKind.MESSAGE_OUT) or ep.actor == me.id}
     derived_by = f"{llm.model_id}/{PROMPT_VERSION}"
     for item in items:
         try:
-            _apply(core, item, labels_p, labels_m, labels_e, me.id, base_scope, derived_by, report)
+            _apply(core, item, labels_p, labels_m, labels_e, me.id, base_scope, derived_by, report,
+                   own if public else set())
         except (ValueError, KeyError, TypeError, LookupError) as exc:
             report.rejected.append(f"{exc}: {str(item)[:200]}")
             log.info("rejected consolidation item: %s", exc)
@@ -161,7 +173,7 @@ def _consolidate_batch(core, llm: LLM, space: str, episodes: list[Episode],
 
 
 def _apply(core, item: dict, labels_p, labels_m, labels_e, self_id: str, base_scope: str, derived_by: str,
-           report: ConsolidationReport) -> None:
+           report: ConsolidationReport, owner_only_sources: set[str] = frozenset()) -> None:
     if not isinstance(item, dict):
         raise TypeError("item is not an object")
     op = item.get("op", "add")
@@ -192,6 +204,8 @@ def _apply(core, item: dict, labels_p, labels_m, labels_e, self_id: str, base_sc
         sources = list(labels_m.values())
 
     scope = _decide_scope(core, item.get("visibility", "space"), subjects, self_id, base_scope)
+    if owner_only_sources.intersection(sources):
+        scope = OWNER
     memory = Memory(kind=kind, text=text, scope=scope, subjects=subjects, importance=importance,
                     sources=sources, derived_by=derived_by,
                     valid_from=timeutil.now() if kind == MemoryKind.FACT else None)

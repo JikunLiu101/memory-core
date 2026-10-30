@@ -99,7 +99,10 @@ memory-core consolidate ./soul
 For each place with new episodes, the model sees the new messages and the related memories it already has, and
 proposes to **add** a memory, **update** one (the old one is kept, marked `superseded`), or nothing. The model
 proposes, code decides: it can never widen visibility — memories about people stay in the place they were learned
-(or `owner`), only memories about no person can become `public`. A place's cursor only advances after its batch
+(or `owner`), only memories about no person can become `public`. In a *public space* (`[spaces] public`, default
+`["web"]`: what the being read online on its own, e.g. with
+[surfing-the-web](https://github.com/JikunLiu101/surfing-the-web)) what it saw becomes `public`, while memories
+drawn from its own thoughts there stay with the owner. A place's cursor only advances after its batch
 was applied, so a failed call loses nothing.
 
 ## Diary and self-image
