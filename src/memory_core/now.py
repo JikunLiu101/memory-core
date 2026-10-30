@@ -16,8 +16,9 @@ The prompts are Chinese for now, like the diary's.
 from __future__ import annotations
 
 import json
+import random
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from . import timeutil
 from .llm import LLM, parse_json
@@ -64,6 +65,44 @@ def longing(hours_since_owner: float | None, half_hours: float = 12) -> float:
 
 _CIRCADIAN = [0.15, 0.1, 0.1, 0.1, 0.1, 0.15, 0.3, 0.45, 0.6, 0.7, 0.8, 0.85,
               0.8, 0.75, 0.85, 0.9, 0.9, 0.85, 0.8, 0.8, 0.75, 0.65, 0.5, 0.3]
+
+
+def jitter(base: float, ratio: float = 0.2, rng: random.Random | None = None) -> float:
+    """`base` give or take `ratio` (0.2: between 80% and 120%), so timings do not tick like a clock."""
+    if ratio <= 0:
+        return base
+    return base * (rng or random).uniform(1 - ratio, 1 + ratio)
+
+
+@dataclass(frozen=True)
+class Schedule:
+    """When she goes to sleep and wakes up on a given day (local times; sleep may be after midnight)."""
+
+    sleep_at: datetime
+    wake_at: datetime
+
+    def asleep(self, local: datetime) -> bool:
+        return local >= self.sleep_at or local < self.wake_at
+
+
+def day_schedule(day: date, *, sleep_hour: float = 23, wake_hour: float = 9, ratio: float = 0.2,
+                 seed: str = "") -> Schedule:
+    """Her bedtime and wake-up time drift a little from day to day (each give or take `ratio` of an hour), the
+    same all day long: drawn from the date (and `seed`), so every plugin agrees on it."""
+    rng = random.Random(f"{seed}:{day.isoformat()}")
+    spread = 60 * ratio
+    midnight = datetime.combine(day, datetime.min.time()).astimezone()
+    sleep = midnight + timedelta(hours=sleep_hour, minutes=rng.uniform(-spread, spread))
+    wake = midnight + timedelta(hours=wake_hour, minutes=rng.uniform(-spread, spread))
+    return Schedule(sleep_at=sleep, wake_at=wake)
+
+
+def schedule_at(local: datetime, **kw) -> Schedule:
+    """The schedule that applies at `local`: before today's wake-up time, last night's bedtime counts."""
+    today = day_schedule(local.date(), **kw)
+    yesterday = day_schedule(local.date() - timedelta(days=1), **kw)
+    return Schedule(sleep_at=today.sleep_at if local >= today.wake_at else yesterday.sleep_at,
+                    wake_at=today.wake_at)
 
 
 def energy(local: datetime, spent: float) -> float:
@@ -243,12 +282,18 @@ class Now:
     outings_today: list[str]
     diary_line: str
     age_days: int | None
+    schedule: Schedule | None = None
+    asleep: bool = False
 
 
 def snapshot(core, *, owner_spaces, now: datetime | None = None, day_boundary_hour: int = 4,
-             longing_half_hours: float = 12, mood_half_hours: float = 12) -> Now:
+             longing_half_hours: float = 12, mood_half_hours: float = 12, sleep_hour: float = 23,
+             wake_hour: float = 9, jitter_ratio: float = 0.2) -> Now:
     now = now or timeutil.now()
     local = now.astimezone()
+    birth_at = _birth(core)
+    sched = schedule_at(local, sleep_hour=sleep_hour, wake_hour=wake_hour, ratio=jitter_ratio,
+                        seed=birth_at.isoformat() if birth_at else "")
     times = _owner_messages(core, owner_spaces, limit=400, since=now - timedelta(days=30))
     talking_now = bool(times) and (now - times[0]).total_seconds() < 300
     previous, talk_start = None, None
@@ -279,15 +324,18 @@ def snapshot(core, *, owner_spaces, now: datetime | None = None, day_boundary_ho
     if diary is not None:
         first = diary.text.strip().split("\n")[0]
         diary_line = first[:60] + ("…" if len(first) > 60 else "")
-    birth = _birth(core)
+    birth = birth_at
     mood = load_mood(core)
     value, fresh = current_mood(mood, now, mood_half_hours)
-    return Now(local=local, energy=energy(local, _spent(core, now, owner_spaces)), mood_value=value,
+    asleep = sched.asleep(local)
+    awake_energy = energy(local, _spent(core, now, owner_spaces))
+    return Now(local=local, energy=min(awake_energy, 0.15) if asleep else awake_energy, mood_value=value,
                mood_fresh=fresh, mood=mood,
                longing=miss,
                last_owner=previous, talking_now=talking_now, visits_today=visits,
                outings_today=_outings_today(core, start),
-               diary_line=diary_line, age_days=(day - current_day(birth, day_boundary_hour)).days + 1 if birth else None)
+               diary_line=diary_line, age_days=(day - current_day(birth, day_boundary_hour)).days + 1 if birth else None,
+               schedule=sched, asleep=asleep)
 
 
 def _energy_words(e: float) -> str:
@@ -308,6 +356,9 @@ def describe(state: Now, *, owner_present: bool, owner_title: str = "主人", no
     lines = ["<now>"]
     week = f"周{_WEEKDAYS[state.local.weekday()]}"
     lines.append(f"- 现在：{week}{part_of_day(state.local)} {state.local:%H:%M}，你{_energy_words(state.energy)}")
+    if state.asleep and state.schedule is not None:
+        woke = "被叫醒了" if state.talking_now else "在睡觉"
+        lines.append(f"- 你本来{woke}（今天大概 {state.schedule.sleep_at:%H:%M} 睡，{state.schedule.wake_at:%H:%M} 醒）")
     if state.mood_fresh > 0.15 and state.mood.label:
         reason = f"（{state.mood.text}）" if owner_present and state.mood.text else ""
         lines.append(f"- 心情：{state.mood.label}{reason}")

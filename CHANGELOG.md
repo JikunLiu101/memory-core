@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Daily schedule (`memory_core.now.day_schedule`, `jitter`): bedtime and wake-up drift a little each day (give or
+  take 20% of an hour, the same all day, so every plugin agrees); asleep means very low energy, and a note when the
+  owner wakes her up. AstrBot adapter: `sleep_hour`, `wake_hour`, `timing_jitter`.
 - Time sense and inner state (`memory_core.now`): how long since the owner last talked (and whether a talk starts
   after a long absence), today's visits and outings, yesterday's diary, the being's age; energy by the hour minus
   recent effort, longing for the owner growing with time apart, and a mood the model judges after each quiet

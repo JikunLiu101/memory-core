@@ -237,7 +237,9 @@ class MemoryCorePlugin(star.Star):
     def _snapshot(self):
         return snapshot(self.core, owner_spaces=self._owner_spaces(),
                         day_boundary_hour=int(self.cfg.get("diary_hour", 4)),
-                        longing_half_hours=float(self.cfg.get("longing_half_hours", 12)))
+                        longing_half_hours=float(self.cfg.get("longing_half_hours", 12)),
+                        sleep_hour=float(self.cfg.get("sleep_hour", 23)), wake_hour=float(self.cfg.get("wake_hour", 9)),
+                        jitter_ratio=float(self.cfg.get("timing_jitter", 0.2)))
 
     async def update_mood_if_due(self) -> bool:
         """After a talk (or an outing) has been quiet for mood_idle_minutes, judge how she feels now."""

@@ -161,5 +161,22 @@
     "description": "Longing reaches half after N hours apart",
     "type": "int",
     "default": 12
+  },
+  "sleep_hour": {
+    "description": "Her bedtime (hour)",
+    "type": "int",
+    "default": 23,
+    "hint": "Drifts a little each day (timing_jitter of an hour). Asleep: very low energy; other plugins (thinking-of-you) do not reach out."
+  },
+  "wake_hour": {
+    "description": "Her wake-up time (hour)",
+    "type": "int",
+    "default": 9
+  },
+  "timing_jitter": {
+    "description": "How much her timings drift",
+    "type": "float",
+    "default": 0.2,
+    "hint": "0.2: give or take 20%. 0: exact."
   }
 }

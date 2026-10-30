@@ -85,3 +85,32 @@ def test_outings_count_today(core):
     s = snapshot(core, owner_spaces=[DM], now=NOW)
     assert s.outings_today == ["塔露拉上岛"] and s.longing is None
     assert "《塔露拉上岛》" in describe(s, owner_present=False)
+
+
+def test_jitter_and_daily_schedule():
+    import random as _r
+    from datetime import date
+    from memory_core.now import day_schedule, jitter, schedule_at
+    rng = _r.Random(1)
+    vals = [jitter(100, 0.2, rng) for _ in range(200)]
+    assert 80 <= min(vals) and max(vals) <= 120 and len({round(v) for v in vals}) > 10
+    assert jitter(100, 0) == 100
+    a = day_schedule(date(2026, 11, 1), seed="x")
+    assert a == day_schedule(date(2026, 11, 1), seed="x")  # the same all day, for every plugin
+    days = [day_schedule(date(2026, 11, d), seed="x") for d in range(1, 15)]
+    assert len({s.sleep_at.strftime("%H:%M") for s in days}) > 3  # but not the same every day
+    for s in days:
+        assert abs((s.sleep_at - s.sleep_at.replace(hour=23, minute=0)).total_seconds()) <= 12 * 60
+        assert abs((s.wake_at - s.wake_at.replace(hour=9, minute=0)).total_seconds()) <= 12 * 60
+    night = schedule_at(datetime(2026, 11, 2, 3, 0).astimezone(), seed="x")
+    assert night.asleep(datetime(2026, 11, 2, 3, 0).astimezone())
+    assert night.sleep_at.date() == date(2026, 11, 1)  # last night's bedtime
+    assert not schedule_at(datetime(2026, 11, 2, 15).astimezone(), seed="x").asleep(datetime(2026, 11, 2, 15).astimezone())
+
+
+def test_woken_up_at_night(core):
+    late = datetime(2026, 11, 2, 2, 0).astimezone()
+    _say(core, "睡了吗", late - timedelta(seconds=30))
+    s = snapshot(core, owner_spaces=[DM], now=late)
+    assert s.asleep and s.energy <= 0.15
+    assert "你本来被叫醒了" in describe(s, owner_present=True, owner_title="老板", now=late)
