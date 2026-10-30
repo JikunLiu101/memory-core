@@ -242,22 +242,32 @@ class MemoryCorePlugin(star.Star):
         keep = str(self.cfg.get("vision_keep_pictures", "owner"))
         save = keep == "all" or (keep == "owner" and owner)
         viewers = self._viewers(asyncio.get_running_loop())
+        if not viewers:
+            logger.warning(f"[memory-core] {len(pictures)} picture(s) not looked at: none of vision_providers "
+                           f"{self.cfg.get('vision_providers')} is an AstrBot provider")
         seen: list[Seen | None] = []
         for i, comp in enumerate(pictures):
+            which = f"picture {i + 1}/{len(pictures)}{' (quoted)' if i >= own else ''}"
+            started = time.monotonic()
             try:
                 data = Path(await comp.convert_to_file_path()).read_bytes()
                 errors: list[str] = []
                 s = await asyncio.to_thread(look, self.core, data, viewers, save=save and i < own, errors=errors)
+                took = time.monotonic() - started
                 if s is None:
-                    logger.warning(f"[memory-core] could not see a picture: "
+                    logger.warning(f"[memory-core] {which}: could not see it after {took:.1f}s: "
                                    f"{_no_urls('; '.join(errors)) or 'no vision provider'}")
+                else:
+                    how = "seen before, used the remembered description" if s.cached else \
+                        f"looked at by {s.model} in {took:.1f}s" + (f" (after: {_no_urls('; '.join(errors))})"
+                                                                     if errors else "")
+                    logger.info(f"[memory-core] {which}: {how}{', picture kept' if s.saved else ''}: "
+                                f"{s.text[:60]}{'…' if len(s.text) > 60 else ''}")
             except Exception as exc:  # noqa: BLE001 - a picture she cannot see is not an error for the chat
-                logger.warning(f"[memory-core] could not read a picture: {_no_urls(exc)}")
+                logger.warning(f"[memory-core] {which}: could not read it: {_no_urls(exc)}")
                 s = None
             seen.append(s)
         event.set_extra("memory_core_seen", seen)
-        logger.info(f"[memory-core] saw {sum(1 for s in seen if s)}/{len(seen)} pictures "
-                    f"({sum(1 for s in seen if s and s.cached)} remembered)")
         return seen[:own] if own else seen
 
     def _main_sees_pictures(self, event: AstrMessageEvent) -> bool:
@@ -300,9 +310,9 @@ class MemoryCorePlugin(star.Star):
             logger.debug(f"[memory-core] cannot read AstrBot personas: {exc}")
         return None
 
-    def _apply_identity(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
+    def _apply_identity(self, event: AstrMessageEvent, req: ProviderRequest, parts: list[str]) -> None:
         """The being's identity documents go first in the system prompt (stable, so cached);
-        who is speaking goes last (it changes per sender)."""
+        who is speaking goes last (it changes per sender). What was added is noted in `parts` (for the log)."""
         docs = [(tag, self.core.identity(name)) for name, tag in IDENTITY_DOCS]
         guide = memory_guide(self.owner_title, int(self.cfg.get("diary_hour", 4)),
                              diary=bool(self.cfg.get("diary_enabled", True)),
@@ -310,9 +320,10 @@ class MemoryCorePlugin(star.Star):
         block = identity_block(docs, guide=guide)
         if not block:
             return
+        parts.append(f"identity ({sum(1 for _, t in docs if t and t.strip())} documents)")
         if self.cfg.get("abilities_enabled", True):
             try:
-                can = self._abilities_block(event)
+                can = self._abilities_block(event, parts)
                 if can:
                     block = f"{block}\n\n{can}"
             except Exception as exc:  # noqa: BLE001 - never block a reply
@@ -328,9 +339,11 @@ class MemoryCorePlugin(star.Star):
             try:
                 _, _, owner = self._where(event)
                 now_note = describe(self._snapshot(), owner_present=owner, owner_title=self.owner_title) + "\n\n"
+                parts.append("inner state")
             except Exception as exc:  # noqa: BLE001 - never block a reply
                 logger.warning(f"[memory-core] inner state failed: {exc}")
         req.system_prompt = f"{block}\n\n{system.strip()}\n\n{now_note}{note}\n"
+        parts.append("speaker: " + ("owner" if sender in self.owner_ids else "not the owner"))
 
     # ---------------------------------------------------------------- what she can do
 
@@ -388,7 +401,7 @@ class MemoryCorePlugin(star.Star):
             out.append(Ability(f"plugin:{meta.name}", f"用「{label}」", text))
         return out
 
-    def _abilities_block(self, event: AstrMessageEvent) -> str:
+    def _abilities_block(self, event: AstrMessageEvent, parts: list[str] | None = None) -> str:
         """The list for the prompt. In the owner's private chat she also notices what changed (once), as a
         thought in that chat, so it reaches her memory and her diary."""
         current = self._abilities()
@@ -400,6 +413,13 @@ class MemoryCorePlugin(star.Star):
                 self.core.record(Episode(kind="thought", content=note, space=space, source="memory-core",
                                          actor=SELF_ALIAS, meta={"ability": a.key}))
                 logger.info(f"[memory-core] she noticed: {note}")
+        if noticed.first and owner:
+            logger.info(f"[memory-core] abilities: first list, taken as what she could always do: "
+                        f"{'、'.join(a.name for a in current)}")
+        if parts is not None:
+            extra = [f"{len(noticed.fresh)} new"] if noticed.fresh else []
+            extra += [f"{len(noticed.gone)} just lost"] if noticed.gone else []
+            parts.append(f"{len(current)} abilities" + (f" ({', '.join(extra)})" if extra else ""))
         return abilities_block(current, noticed, self.owner_title)
 
     def _owner_spaces(self) -> list[str]:
@@ -433,16 +453,30 @@ class MemoryCorePlugin(star.Star):
         """Identity into the system prompt; relevant memories next to the user's message."""
         if self.core is None:
             return
+        parts: list[str] = []
+        try:
+            await self._inject(event, req, parts)
+        finally:
+            logger.info(f"[memory-core] before the reply in {self._where(event)[0]}: "
+                        f"{'; '.join(parts) or 'nothing added'}")
+
+    async def _inject(self, event: AstrMessageEvent, req: ProviderRequest, parts: list[str]) -> None:
         if self.cfg.get("inject_identity", True):
             try:
-                await asyncio.to_thread(self._apply_identity, event, req)
+                await asyncio.to_thread(self._apply_identity, event, req, parts)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[memory-core] identity injection failed: {exc}")
         seen = event.get_extra("memory_core_seen") or []
-        if seen and req.image_urls and not self._main_sees_pictures(event):
-            # the chat model is text-only: it gets what she saw instead of the pictures
-            req.image_urls = []
-            req.extra_user_content_parts.append(TextPart(text=caption_block(seen)))
+        if seen and req.image_urls:
+            n = len(req.image_urls)
+            if self._main_sees_pictures(event):
+                parts.append(f"{n} picture(s) passed on as they are (the chat model sees pictures)")
+            else:
+                # the chat model is text-only: it gets what she saw instead of the pictures
+                req.image_urls = []
+                req.extra_user_content_parts.append(TextPart(text=caption_block(seen)))
+                parts.append(f"{n} picture(s) replaced by what she saw ({sum(1 for s in seen if s)} described; "
+                             "AstrBot's 'does not support image input' warning before this is expected)")
         if not self.cfg.get("inject_memories", True):
             return
         query = (event.get_message_str() or "").strip() or " ".join(s.text for s in seen if s)
@@ -459,7 +493,9 @@ class MemoryCorePlugin(star.Star):
         block = memory_block([h.memory.text for h in hits], int(self.cfg.get("inject_max_chars", 1200)))
         if block:
             req.extra_user_content_parts.append(TextPart(text=block))
-            logger.debug(f"[memory-core] injected {len(hits)} memories for {space}")
+        parts.append(f"{len(hits)} memories recalled")
+        for h in hits:
+            logger.debug(f"[memory-core]   recalled ({h.score:.2f}): {h.memory.text[:60]}")
 
     # ---------------------------------------------------------------- tools for the model
 
