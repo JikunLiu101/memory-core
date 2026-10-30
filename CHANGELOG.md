@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Time sense and inner state (`memory_core.now`): how long since the owner last talked (and whether a talk starts
+  after a long absence), today's visits and outings, yesterday's diary, the being's age; energy by the hour minus
+  recent effort, longing for the owner growing with time apart, and a mood the model judges after each quiet
+  conversation or outing (stored in the soul, fading back to calm). `describe()` renders it in words; things
+  about the owner only for the owner. AstrBot adapter: injected before each reply (`inner_state`), mood checked
+  every 10 minutes (`mood_idle_minutes`), shown in `/mem_status`.
 - Consolidation (prompt `consolidate-v2`): when new messages tell how a plan in an existing memory turned out,
   the memory is updated instead of a second one being added; a new `merge` op joins existing memories that record
   the same thing (e.g. a plan and its outcome) into one, keeping their shared scope. `MemoryCore.merge` takes

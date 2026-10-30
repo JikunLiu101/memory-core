@@ -144,5 +144,22 @@
     "type": "float",
     "default": 0.25,
     "hint": "Strength halves every 30 days without being recalled. Important memories (>= 0.8) and diaries are never archived; archived ones come back when deliberately recalled."
+  },
+  "inner_state": {
+    "description": "Time sense and inner state",
+    "type": "bool",
+    "default": true,
+    "hint": "Before each reply: how long since the owner was here, today's visits and outings, energy by the hour, longing for the owner, and a mood judged after each quiet conversation. Things about the owner are only shown in the owner's private chat."
+  },
+  "mood_idle_minutes": {
+    "description": "Judge the mood after N quiet minutes",
+    "type": "int",
+    "default": 30,
+    "hint": "One model call per conversation or outing."
+  },
+  "longing_half_hours": {
+    "description": "Longing reaches half after N hours apart",
+    "type": "int",
+    "default": 12
   }
 }

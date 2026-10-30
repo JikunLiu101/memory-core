@@ -26,6 +26,7 @@ from memory_core import Audience, Episode, Memory, MemoryCore
 from memory_core import timeutil
 from memory_core.consolidate import due_spaces, remember
 from memory_core.metabolism import fade, merge_duplicates
+from memory_core.now import describe, mood_due, snapshot, update_mood
 from memory_core.proposals import proposals, propose, resolve
 from memory_core.reflect import current_day, day_window, diary_for, update_self_image, write_diary
 
@@ -221,7 +222,38 @@ class MemoryCorePlugin(star.Star):
         sender = str(event.get_sender_id())
         note = speaker_note(sender in self.owner_ids, self.owner_title, (event.get_sender_name() or "").strip(),
                             bool(event.get_group_id()))
-        req.system_prompt = f"{block}\n\n{system.strip()}\n\n{note}\n"
+        now_note = ""
+        if self.cfg.get("inner_state", True):
+            try:
+                _, _, owner = self._where(event)
+                now_note = describe(self._snapshot(), owner_present=owner, owner_title=self.owner_title) + "\n\n"
+            except Exception as exc:  # noqa: BLE001 - never block a reply
+                logger.warning(f"[memory-core] inner state failed: {exc}")
+        req.system_prompt = f"{block}\n\n{system.strip()}\n\n{now_note}{note}\n"
+
+    def _owner_spaces(self) -> list[str]:
+        return owner_spaces(self.core.store.space_heads().keys(), self.owner_ids)
+
+    def _snapshot(self):
+        return snapshot(self.core, owner_spaces=self._owner_spaces(),
+                        day_boundary_hour=int(self.cfg.get("diary_hour", 4)),
+                        longing_half_hours=float(self.cfg.get("longing_half_hours", 12)))
+
+    async def update_mood_if_due(self) -> bool:
+        """After a talk (or an outing) has been quiet for mood_idle_minutes, judge how she feels now."""
+        provider_id = self._provider_id()
+        if not provider_id:
+            return False
+        newest = await asyncio.to_thread(mood_due, self.core, self._owner_spaces(), timeutil.now(),
+                                         float(self.cfg.get("mood_idle_minutes", 30)))
+        if newest is None:
+            return False
+        llm = AstrBotLLM(self.context, provider_id, asyncio.get_running_loop(), timeout=120)
+        mood = await asyncio.to_thread(update_mood, self.core, llm, owner_spaces=self._owner_spaces(),
+                                       persona=self._persona("self", "self-image"), owner_title=self.owner_title,
+                                       until=newest)
+        logger.info(f"[memory-core] mood: {mood.label} ({mood.value:+.1f})")
+        return True
 
     @filter.on_llm_request()
     async def inject(self, event: AstrMessageEvent, req: ProviderRequest):
@@ -417,6 +449,11 @@ class MemoryCorePlugin(star.Star):
         hour = int(self.cfg.get("diary_hour", 4))
         while True:
             try:
+                if self.cfg.get("inner_state", True):
+                    try:
+                        await self.update_mood_if_due()
+                    except Exception as exc:  # noqa: BLE001 - the diary must still be written
+                        logger.warning(f"[memory-core] mood update failed (will retry): {exc}")
                 yesterday = current_day(timeutil.now(), hour) - timedelta(days=1)  # a finished day
                 if self.cfg.get("diary_enabled", True) and \
                         await asyncio.to_thread(diary_for, self.core, yesterday) is None:
@@ -573,7 +610,10 @@ class MemoryCorePlugin(star.Star):
         yield event.plain_result(
             f"经历 {stats['episodes']} 条，记忆 {stats['memories']} 条，实体 {stats['entities']} 个，"
             f"向量 {stats['embeddings']} 个（{stats['embedder'] or '未配置嵌入模型'}）。\n"
-            f"待整理：{sum(pending.values())} 条，来自 {len(pending)} 个场所。")
+            f"待整理：{sum(pending.values())} 条，来自 {len(pending)} 个场所。"
+            + ("\n\n" + await asyncio.to_thread(
+                lambda: describe(self._snapshot(), owner_present=True, owner_title=self.owner_title))
+               if self.cfg.get("inner_state", True) else ""))
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("mem_consolidate")
