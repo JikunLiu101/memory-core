@@ -114,8 +114,11 @@ def energy(local: datetime, spent: float) -> float:
 # ---------------------------------------------------------------- what the episodes say
 
 
-def _owner_messages(core, owner_spaces, limit: int = 200, since: datetime | None = None) -> list[datetime]:
-    """Times the owner said something (newest first)."""
+def owner_messages(core, owner_spaces, limit: int = 200, since: datetime | None = None) -> list[datetime]:
+    """Times the owner said something in `owner_spaces` (newest first), since `since`. Looks at the latest `limit`
+    episodes of each space (replies included) and returns at most `limit` times.
+
+    Public: other plugins use it (for example to know how long the owner has been away)."""
     times = []
     for space in owner_spaces:
         for ep in core.episodes(space, since=since, limit=limit, newest_first=True):
@@ -294,7 +297,7 @@ def snapshot(core, *, owner_spaces, now: datetime | None = None, day_boundary_ho
     birth_at = _birth(core)
     sched = schedule_at(local, sleep_hour=sleep_hour, wake_hour=wake_hour, ratio=jitter_ratio,
                         seed=birth_at.isoformat() if birth_at else "")
-    times = _owner_messages(core, owner_spaces, limit=400, since=now - timedelta(days=30))
+    times = owner_messages(core, owner_spaces, limit=400, since=now - timedelta(days=30))
     talking_now = bool(times) and (now - times[0]).total_seconds() < 300
     previous, talk_start = None, None
     if talking_now:

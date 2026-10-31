@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from memory_core import Episode
 from memory_core.now import (
-    ago, describe, energy, load_mood, longing, mood_due, snapshot, update_mood,
+    ago, describe, energy, load_mood, longing, mood_due, owner_messages, snapshot, update_mood,
 )
 
 DM = "qq:private:owner"
@@ -47,6 +47,16 @@ def test_snapshot_after_an_absence(core):
     assert "老板隔了好久才来找你" in note and "3 天前" in note and "想老板：很想" in note
     later = snapshot(core, owner_spaces=[DM], now=NOW + timedelta(minutes=2))
     assert later.longing <= s.longing
+
+
+def test_owner_messages(core):
+    _say(core, "早", NOW - timedelta(days=2))
+    _say(core, "在吗", NOW - timedelta(hours=1))
+    _say(core, "我的回复", NOW - timedelta(minutes=30), kind="message_out")
+    _say(core, "别处的话", NOW - timedelta(minutes=10), space="qq:group:1")
+    assert owner_messages(core, [DM]) == [NOW - timedelta(hours=1), NOW - timedelta(days=2)]
+    assert owner_messages(core, [DM], limit=2) == [NOW - timedelta(hours=1)]  # the latest two: a reply, a message
+    assert owner_messages(core, [DM], since=NOW - timedelta(days=1)) == [NOW - timedelta(hours=1)]
 
 
 def test_quiet_and_privacy(core):
