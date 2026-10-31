@@ -78,3 +78,37 @@ def test_owner_console_only_owner_private_on_listed_platform():
     assert not logic.owner_console("aiocqhttp", False, "10001", owners, web)       # owner, unlisted platform
     assert logic.owner_console("aiocqhttp", False, "10001", owners, web + ["aiocqhttp"])
     assert not logic.owner_console(None, False, "astrbot", owners, [])
+
+
+def test_strip_transient_keeps_history_stable():
+    mem = logic.memory_block(["likes tea"])
+    history = [
+        {"role": "user", "content": [{"type": "text", "text": "hello"},
+                                     {"type": "text", "text": "<system_reminder>Current datetime: x</system_reminder>"},
+                                     {"type": "text", "text": mem},
+                                     {"type": "text", "text": "<now>\n- tired\n</now>"}]},
+        {"role": "assistant", "content": "hi <now>kept in replies</now>"},
+        {"role": "user", "content": f"how are you\n\n{mem}"},
+        {"role": "user", "content": [{"type": "text", "text": mem}]},
+    ]
+    assert logic.strip_transient(history) == 3
+    assert [p["text"] for p in history[0]["content"]] == [
+        "hello", "<system_reminder>Current datetime: x</system_reminder>"]
+    assert history[1]["content"] == "hi <now>kept in replies</now>"
+    assert history[2]["content"] == "how are you"
+    assert len(history[3]["content"]) == 1  # never left empty
+    first = [dict(m) if isinstance(m, dict) else m for m in history]
+    assert logic.strip_transient(history) == 0 and history == first
+
+
+def test_strip_transient_objects():
+    class Part:
+        def __init__(self, text):
+            self.text = text
+
+    class Msg:
+        def __init__(self, role, content):
+            self.role, self.content = role, content
+
+    msg = Msg("user", [Part("hi"), Part("<long_term_memory>\nx\n</long_term_memory>")])
+    assert logic.strip_transient([msg]) == 1 and [p.text for p in msg.content] == ["hi"]

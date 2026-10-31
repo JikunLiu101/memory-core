@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Prompt caching (AstrBot adapter): the system prompt now holds only what stays the same between replies
+  (identity, memory guide, abilities, who is speaking); the inner state `<now>` goes with the user's message, like
+  the recalled memories. Before each request, `<long_term_memory>` and `<now>` blocks are taken out of the earlier
+  user messages in the history (`strip_transient`), so the history is identical from one request to the next and
+  the provider's prompt cache covers it (and old memories no longer pile up in it). The memory guide tells the
+  being these blocks are notes from the system, not something the other person said.
 - The being can write its diary itself (`diary_write`, AstrBot adapter, only in the owner's private chat,
   `diary_tool_per_day`, default 3). `write_diary(extend=True)` keeps what is written and continues it with what
   happened since (`unwritten()`); `note` is something the being wants to be sure to write about. The daily routine

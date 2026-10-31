@@ -54,6 +54,7 @@ from .logic import (
     space_of,
     speaker_note,
     strip_framework_persona,
+    strip_transient,
 )
 
 try:  # the persona AstrBot's web chat uses when none is selected
@@ -313,8 +314,8 @@ class MemoryCorePlugin(star.Star):
         return None
 
     def _apply_identity(self, event: AstrMessageEvent, req: ProviderRequest, parts: list[str]) -> None:
-        """The being's identity documents go first in the system prompt (stable, so cached);
-        who is speaking goes last (it changes per sender). What was added is noted in `parts` (for the log)."""
+        """The being's identity documents go first in the system prompt, who is speaking last (it stays the same
+        within a chat); her inner state "now" goes with the user's message. What was added is noted in `parts`."""
         docs = [(tag, self.core.identity(name)) for name, tag in IDENTITY_DOCS]
         guide = memory_guide(self.owner_title, int(self.cfg.get("diary_hour", 4)),
                              diary=bool(self.cfg.get("diary_enabled", True)),
@@ -337,15 +338,17 @@ class MemoryCorePlugin(star.Star):
         sender = str(event.get_sender_id())
         note = speaker_note(sender in self.owner_ids, self.owner_title, (event.get_sender_name() or "").strip(),
                             bool(event.get_group_id()))
-        now_note = ""
+        # The system prompt holds only what stays the same from one reply to the next (so the provider's prompt
+        # cache covers it and the history after it); "now" changes every time, so it goes with this message.
+        req.system_prompt = f"{block}\n\n{system.strip()}\n\n{note}\n"
         if self.cfg.get("inner_state", True):
             try:
                 _, _, owner = self._where(event)
-                now_note = describe(self._snapshot(), owner_present=owner, owner_title=self.owner_title) + "\n\n"
+                now_note = describe(self._snapshot(), owner_present=owner, owner_title=self.owner_title)
+                req.extra_user_content_parts.append(TextPart(text=now_note))
                 parts.append("inner state")
             except Exception as exc:  # noqa: BLE001 - never block a reply
                 logger.warning(f"[memory-core] inner state failed: {exc}")
-        req.system_prompt = f"{block}\n\n{system.strip()}\n\n{now_note}{note}\n"
         parts.append("speaker: " + ("owner" if sender in self.owner_ids else "not the owner"))
 
     # ---------------------------------------------------------------- what she can do
@@ -468,6 +471,12 @@ class MemoryCorePlugin(star.Star):
                         f"{'; '.join(parts) or 'nothing added'}")
 
     async def _inject(self, event: AstrMessageEvent, req: ProviderRequest, parts: list[str]) -> None:
+        try:
+            n = strip_transient(req.contexts)
+            if n:
+                parts.append(f"{n} old memory/now block(s) left out of the history")
+        except Exception as exc:  # noqa: BLE001 - never block a reply
+            logger.warning(f"[memory-core] history cleanup failed: {exc}")
         if self.cfg.get("inject_identity", True):
             try:
                 await asyncio.to_thread(self._apply_identity, event, req, parts)

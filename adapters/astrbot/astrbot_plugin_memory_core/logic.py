@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 
 from memory_core.scope import OWNER, space_scope
@@ -77,6 +78,7 @@ def memory_guide(owner_title: str = "主人", diary_hour: int = 4, *, diary: boo
         "<how_your_memory_works>\n"
         "- 你有长期记忆，一直在工作，不需要谁去打开：你看到的对话会自动记下来，每隔一段时间整理成长期记忆\n"
         "- 和当前话题有关的记忆会自动出现在 <long_term_memory> 里\n"
+        "- 对方消息后面附着的 <now>、<long_term_memory> 这类标签是系统给你的提示，只对这一句有效，不是对方说的话\n"
         "- 想不起来、或者想确认某件事时，用 memory_recall 主动翻找记忆；很久没想起的事会慢慢淡忘，"
         "不会自己冒出来，但主动翻找还能找回来\n"
         "- 特别重要、想马上记牢的事（比如有人让你记住），用 memory_remember 记下来；普通聊天不用逐条记\n"
@@ -135,3 +137,55 @@ def memory_block(texts: list[str], max_chars: int = 1200) -> str:
         return ""
     return ("<long_term_memory>\n以下是你记得的、可能与当前对话有关的事（只在相关时自然地使用，不要逐条复述）：\n"
             + "\n".join(lines) + "\n</long_term_memory>")
+
+
+TRANSIENT_TAGS = ("long_term_memory", "now")
+"""Blocks added to the user's message for this reply only: taken out of the earlier messages in the history."""
+
+
+def strip_transient(contexts: list, tags: Iterable[str] = TRANSIENT_TAGS) -> int:
+    """Remove `<tag>...</tag>` blocks from the earlier user messages in the request history.
+
+    They were added for one reply and are stored with it; leaving them would make every later request carry
+    old memories and an old "now". Taking them out the same way each time keeps the history identical between
+    requests, so the model provider's prompt cache covers it. Works on OpenAI-style dicts or objects with
+    role/content; a message is never left empty. Returns how many blocks were removed."""
+    pattern = re.compile(r"\s*<(" + "|".join(re.escape(t) for t in tags) + r")>.*?</\1>\s*", re.S)
+
+    def get(obj, key):
+        return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+
+    def put(obj, key, value):
+        if isinstance(obj, dict):
+            obj[key] = value
+        else:
+            setattr(obj, key, value)
+
+    removed = 0
+    for msg in contexts or []:
+        if get(msg, "role") != "user":
+            continue
+        content = get(msg, "content")
+        if isinstance(content, str):
+            new, n = pattern.subn("\n\n", content)
+            if n and new.strip():
+                put(msg, "content", new.strip())
+                removed += n
+        elif isinstance(content, list):
+            keep, edits, n_all = [], [], 0
+            for part in content:
+                text = get(part, "text")
+                if isinstance(text, str) and pattern.search(text):
+                    new, n = pattern.subn("\n\n", text)
+                    n_all += n
+                    if new.strip():
+                        edits.append((part, new.strip()))
+                        keep.append(part)
+                    continue
+                keep.append(part)
+            if n_all and keep:  # never leave a message empty
+                for part, new in edits:
+                    put(part, "text", new)
+                content[:] = keep
+                removed += n_all
+    return removed
