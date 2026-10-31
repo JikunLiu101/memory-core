@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 (2026-10-31)
 
+- `memory_core.now.owner_messages` is public (it was `_owner_messages`): the times the owner said something,
+  for other plugins that want to know how long the owner has been away.
 - A read-only dashboard (AstrBot plugin view `memory`, AstrBot 4.24.2+): overview, memories with the messages
   they came from and all their versions, recall explained (each part of the score and the rank in each channel;
   two places side by side; nothing is reinforced), and a graph of the entities the memories are about. No

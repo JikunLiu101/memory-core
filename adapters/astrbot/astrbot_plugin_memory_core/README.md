@@ -68,7 +68,7 @@ AstrBot 4.24.2 起，在后台「插件 → memory-core → 视图 → 记忆面
 
 ```bash
 # 在 AstrBot 的 Python 环境里
-pip install "memory-core @ git+https://github.com/JikunLiu101/memory-core@v0.4.0"
+pip install "memory-core @ git+https://github.com/JikunLiu101/memory-core@v0.5.0"
 ```
 
 把 `astrbot_plugin_memory_core/` 放进 AstrBot 的 `data/plugins/`，重启 AstrBot，然后至少在插件设置里填好“主人的用户 ID”。记忆目录默认是 `data/plugin_data/astrbot_plugin_memory_core/soul`，想放在会备份的地方就改“记忆目录”。

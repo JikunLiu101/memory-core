@@ -5,8 +5,9 @@
 A local-first, framework-agnostic long-term memory core for AI companions.
 
 > Status: **pre-alpha (M2)**. Storage, hybrid recall, the bundle format, LLM consolidation, an MCP server, an
-> AstrBot adapter, the daily diary and self-image, and memory metabolism (fading, merging, hard forgetting) work and
-> are tested. APIs may change.
+> AstrBot adapter, the daily diary and self-image, memory metabolism (fading, merging, hard forgetting), seeing
+> pictures, a sense of time and inner state, what the being can do, and a read-only dashboard work and are tested.
+> APIs may change.
 
 ## Why
 

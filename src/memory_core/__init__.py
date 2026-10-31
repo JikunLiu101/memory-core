@@ -1,6 +1,6 @@
 """memory-core: a local-first, framework-agnostic long-term memory core for AI companions."""
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 from .core import MemoryCore, RecallWeights  # noqa: E402
 from .embed import Embedder, HashEmbedder, OpenAICompatibleEmbedder  # noqa: E402
