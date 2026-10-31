@@ -58,7 +58,7 @@ model = "bge-m3"
 
 - **整理**：在 `soul/config.toml` 里配置 `[llm]`（任何兼容 OpenAI 接口的模型，Key 放在环境变量里，用 `api_key_env` 指定），然后运行 `memory-core consolidate ./soul`。模型看到新消息和已有的相关记忆后，提出新增、更新（旧记忆保留并标记为已取代）或不动。**模型只负责提议，可见范围由代码决定**：关于人的记忆只留在学到它的那个场所（或主人私聊），只有不涉及任何人的内容才能公开。**公开场所**（`[spaces] public`，默认 `["web"]`，例如用 [surfing-the-web](https://github.com/JikunLiu101/surfing-the-web) 自己上网看到的）里看到的内容会公开，从它自己的想法整理出的记忆只给主人。
 - **MCP 服务**：`memory-core mcp ./soul`（只读加 `--read-only`），Claude Code 等任何 MCP 客户端都能共用同一份记忆。
-- **AstrBot 适配器**：见 [`adapters/astrbot`](adapters/astrbot/README.md)。
+- **AstrBot 适配器**：见 [`adapters/astrbot`](adapters/astrbot/README.md)。AstrBot 4.24.2 起，后台「插件 → memory-core → 视图 → memory」是一个只读面板：总览、记忆（来自哪几句话、每个版本）、召回调试（每项得分、在哪条路线排第几，可对比两个地方会想起什么，调试不会让记忆变强）、图谱（记忆是关于谁、什么的）。
 
 路线图、致谢和 Python 用法见[英文版](README.md)。
 

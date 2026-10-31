@@ -390,10 +390,12 @@ class MemoryCore:
             return []
         fused: dict[str, float] = {}
         found_by: dict[str, list[str]] = {}
+        ranks: dict[str, dict[str, int]] = {}
         for name in active:
             for rank, memory_id in enumerate(channels[name]):
                 fused[memory_id] = fused.get(memory_id, 0.0) + 1.0 / (_RRF_K + 1 + rank)
                 found_by.setdefault(memory_id, []).append(name)
+                ranks.setdefault(memory_id, {})[name] = rank + 1
         best_possible = len(active) / (_RRF_K + 1)
 
         memories = self.store.get_memories(fused)
@@ -408,7 +410,7 @@ class MemoryCore:
             score = (w.relevance * relevance + w.recency * recency
                      + w.importance * m.importance + w.strength * m.strength)
             hits.append(RecallHit(memory=m, score=score, relevance=relevance, recency=recency,
-                                  channels=found_by[memory_id]))
+                                  channels=found_by[memory_id], ranks=ranks[memory_id]))
         hits.sort(key=lambda h: (-h.score, h.memory.id))
         hits = hits[:k]
 

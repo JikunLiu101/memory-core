@@ -10,6 +10,8 @@
 - gives the model `memory_recall` / `memory_remember` tools
 - sees pictures through a vision model (cached by content) and remembers what was in them
 - tells the being what it can do (collected from the installed plugins) and lets it notice new abilities
+- a dashboard for the owner (AstrBot plugin view "memory", read-only): overview, memories with their sources
+  and versions, recall explained, a graph of who and what the memories are about
 """
 
 from __future__ import annotations
@@ -56,6 +58,7 @@ from .logic import (
     strip_framework_persona,
     strip_transient,
 )
+from .panel import Panel
 
 try:  # the persona AstrBot's web chat uses when none is selected
     from astrbot.core.astr_main_agent_resources import CHATUI_SPECIAL_DEFAULT_PERSONA_PROMPT as _WEBCHAT_DEFAULT
@@ -105,6 +108,11 @@ class MemoryCorePlugin(star.Star):
         self._reflecting = asyncio.Lock()
         self._known_names: dict[str, str] = {}
         self._forget_candidates: dict[str, list[str]] = {}  # sender -> memory ids listed by /mem_forget
+        try:  # the owner's dashboard (plugin view "memory"); read-only
+            if not Panel(self).register():
+                logger.info("[memory-core] this AstrBot has no plugin Web API: the dashboard is not available")
+        except Exception as exc:  # noqa: BLE001 - the memory works without its dashboard
+            logger.warning(f"[memory-core] dashboard not registered: {exc}")
 
     # ---------------------------------------------------------------- lifecycle
 

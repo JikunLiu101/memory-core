@@ -167,7 +167,8 @@ what is visible there.
   answers, uses the identity documents as the persona, injects recalled memories before each reply,
   consolidates periodically with AstrBot's own chat model, writes the daily diary and self-image, runs the daily
   memory metabolism, gives the model `memory_recall` / `memory_remember` / `identity_propose` tools, and the owner
-  commands to forget and to approve proposals.
+  commands to forget and to approve proposals; a read-only dashboard (overview, memories with their sources and
+  versions, recall explained, a graph of who and what the memories are about).
 
 ## Roadmap
 

@@ -16,6 +16,22 @@ gives the bot a long-term memory backed by memory-core.
 | Model tools | `memory_recall(query)` (also finds faded memories, which brings them back), `memory_remember(text, kind)`, `identity_propose(text, reason)` (a change to the core identity, waits for the owner; only in the owner's private chat, so nobody else can talk it into one). There is no tool to delete memories |
 | Owner commands (only the owner, in a private chat, on a platform in `owner_command_platforms`, default only the local `webchat`; anyone else and every group gets no answer) | `/mem_status`, `/mem_consolidate` (runs now, for every chat with new messages), `/mem_diary` (writes today's diary now), `/mem_tidy` (metabolism now), `/mem_forget <words>` then `/mem_forget_do <numbers>` (hard forget, with the source messages; affected diaries are rewritten), `/mem_proposals`, `/mem_approve <id>`, `/mem_reject <id>` |
 
+### Dashboard
+
+AstrBot 4.24.2 and later show plugin views: open **Plugins → memory-core → Views → memory** in the AstrBot
+dashboard. It is read-only:
+
+| Page | What |
+|---|---|
+| Overview | counts by kind and status, active memories by scope, the spaces with their pending messages, what the being can do (as it is listed in its prompt), its inner state now |
+| Memories | filter by words, kind, status, scope or entity; each memory with the messages it came from and all its versions (superseded, merged) |
+| Recall | type a sentence, pick where it was said and whether the owner is there: what would be recalled, with every part of each score (relevance, recency, importance, strength) and the place it got in each channel (full text, vectors, entities). Compare two places side by side, e.g. to check that owner-only memories stay out of a group. Nothing is reinforced and archived memories are not woken up |
+| Graph | who and what the memories are about: by default only the entities, joined when they share memories (thicker = more); "detailed" also draws every memory. Click an entity to read what the being knows about it |
+
+The page uses no third-party libraries and loads nothing from the internet. Its Web API
+(`/astrbot_plugin_memory_core/page/*`) shows every scope, so it relies on AstrBot serving plugin Web APIs only to
+a logged-in dashboard user or an API key with the `plugin` scope: do not give such a key to anyone else.
+
 ### Identity documents
 
 Markdown files in `<soul_dir>/identity/`, read on every reply (edits apply immediately):

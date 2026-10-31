@@ -97,3 +97,4 @@ class RecallHit:
     relevance: float
     recency: float
     channels: list[str]  # which retrieval channels found it: "text", "vector", "entity"
+    ranks: dict[str, int] = field(default_factory=dict)  # its place in each of those channels (1 = first)

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- A read-only dashboard (AstrBot plugin view `memory`, AstrBot 4.24.2+): overview, memories with the messages
+  they came from and all their versions, recall explained (each part of the score and the rank in each channel;
+  two places side by side; nothing is reinforced), and a graph of the entities the memories are about. No
+  third-party front-end libraries. The views live in the library (`memory_core.browse`: `overview`,
+  `list_memories`, `memory_detail`, `history`, `explain_recall`, `graph`, `entity_detail`, `pending_counts`), so
+  other hosts can offer them too; they show every scope and are meant for the owner only.
+- `RecallHit.ranks`: the place a memory got in each retrieval channel.
+
 - Prompt caching (AstrBot adapter): the system prompt now holds only what stays the same between replies
   (identity, memory guide, abilities, who is speaking); the inner state `<now>` goes with the user's message, like
   the recalled memories. Before each request, `<long_term_memory>` and `<now>` blocks are taken out of the earlier
