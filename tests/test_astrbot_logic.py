@@ -112,3 +112,8 @@ def test_strip_transient_objects():
 
     msg = Msg("user", [Part("hi"), Part("<long_term_memory>\nx\n</long_term_memory>")])
     assert logic.strip_transient([msg]) == 1 and [p.text for p in msg.content] == ["hi"]
+
+
+def test_abilities_news_is_taken_out_of_the_history():
+    history = [{"role": "user", "content": "在吗\n\n<abilities_news>\n- 刚有的本事：看图\n</abilities_news>"}]
+    assert logic.strip_transient(history) == 1 and history[0]["content"] == "在吗"

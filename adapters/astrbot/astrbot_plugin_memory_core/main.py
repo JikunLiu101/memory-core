@@ -32,7 +32,7 @@ from astrbot.core.agent.message import TextPart
 
 from memory_core import Audience, Episode, Memory, MemoryCore
 from memory_core import timeutil
-from memory_core.abilities import Ability, abilities_block, gained_note, lost_note, notice
+from memory_core.abilities import Ability, abilities_block, abilities_news, gained_note, lost_note, notice
 from memory_core.consolidate import due_spaces, remember
 from memory_core.metabolism import fade, merge_duplicates
 from memory_core.now import describe, mood_due, snapshot, update_mood
@@ -46,6 +46,7 @@ from .logic import (
     SELF_ALIAS,
     actor_alias,
     default_scope,
+    CHANGING_DOCS,
     identity_block,
     is_command,
     is_owner_private,
@@ -322,22 +323,26 @@ class MemoryCorePlugin(star.Star):
         return None
 
     def _apply_identity(self, event: AstrMessageEvent, req: ProviderRequest, parts: list[str]) -> None:
-        """The being's identity documents go first in the system prompt, who is speaking last (it stays the same
-        within a chat); her inner state "now" goes with the user's message. What was added is noted in `parts`."""
-        docs = [(tag, self.core.identity(name)) for name, tag in IDENTITY_DOCS]
+        """The system prompt, in the order things change (the provider caches the longest unchanged start):
+        what stays the same (identity, voice, how memory works), then what other plugins put there, then what
+        changes now and then (the self-image, rewritten daily; the abilities list, when one comes or goes), then
+        who is speaking (the same within a chat). What changes every reply goes with the user's message: her
+        inner state "now" and what is new among her abilities. What was added is noted in `parts`."""
+        docs = [(name, tag, self.core.identity(name)) for name, tag in IDENTITY_DOCS]
         guide = memory_guide(self.owner_title, int(self.cfg.get("diary_hour", 4)),
                              diary=bool(self.cfg.get("diary_enabled", True)),
                              tidy=bool(self.cfg.get("tidy_enabled", True)),
                              diary_now=int(self.cfg.get("diary_tool_per_day", 3)) > 0)
-        block = identity_block(docs, guide=guide)
-        if not block:
+        if not any(t and t.strip() for _, _, t in docs):
             return
-        parts.append(f"identity ({sum(1 for _, t in docs if t and t.strip())} documents)")
+        steady = identity_block([(tag, t) for name, tag, t in docs if name not in CHANGING_DOCS], guide=guide)
+        changing = [identity_block([(tag, t) for name, tag, t in docs if name in CHANGING_DOCS], guide="")]
+        parts.append(f"identity ({sum(1 for _, _, t in docs if t and t.strip())} documents)")
+        news = ""
         if self.cfg.get("abilities_enabled", True):
             try:
-                can = self._abilities_block(event, parts)
-                if can:
-                    block = f"{block}\n\n{can}"
+                can, news = self._abilities_block(event, parts)
+                changing.append(can)
             except Exception as exc:  # noqa: BLE001 - never block a reply
                 logger.warning(f"[memory-core] abilities failed: {exc}")
         system = req.system_prompt or ""
@@ -346,9 +351,10 @@ class MemoryCorePlugin(star.Star):
         sender = str(event.get_sender_id())
         note = speaker_note(sender in self.owner_ids, self.owner_title, (event.get_sender_name() or "").strip(),
                             bool(event.get_group_id()))
-        # The system prompt holds only what stays the same from one reply to the next (so the provider's prompt
-        # cache covers it and the history after it); "now" changes every time, so it goes with this message.
-        req.system_prompt = f"{block}\n\n{system.strip()}\n\n{note}\n"
+        sections = [steady, system.strip(), *changing, note]
+        req.system_prompt = "\n\n".join(s for s in sections if s and s.strip()) + "\n"
+        if news:
+            req.extra_user_content_parts.append(TextPart(text=news))
         if self.cfg.get("inner_state", True):
             try:
                 _, _, owner = self._where(event)
@@ -419,8 +425,9 @@ class MemoryCorePlugin(star.Star):
             out.append(Ability(f"plugin:{meta.name}", f"用「{label}」", text))
         return out
 
-    def _abilities_block(self, event: AstrMessageEvent, parts: list[str] | None = None) -> str:
-        """The list for the prompt. In the owner's private chat she also notices what changed (once), as a
+    def _abilities_block(self, event: AstrMessageEvent, parts: list[str] | None = None) -> tuple[str, str]:
+        """The list for the system prompt (it changes only when an ability comes or goes) and what is new among
+        them (for this reply's message). In the owner's private chat she also notices what changed (once), as a
         thought in that chat, so it reaches her memory and her diary."""
         current = self._abilities()
         space, _, owner = self._where(event)
@@ -438,7 +445,8 @@ class MemoryCorePlugin(star.Star):
             extra = [f"{len(noticed.fresh)} new"] if noticed.fresh else []
             extra += [f"{len(noticed.gone)} just lost"] if noticed.gone else []
             parts.append(f"{len(current)} abilities" + (f" ({', '.join(extra)})" if extra else ""))
-        return abilities_block(current, noticed, self.owner_title)
+        return (abilities_block(current, noticed, self.owner_title, marks=False),
+                abilities_news(current, noticed, self.owner_title))
 
     def _owner_spaces(self) -> list[str]:
         return owner_spaces(self.core.store.space_heads().keys(), self.owner_ids)

@@ -57,6 +57,8 @@ def default_scope(space: str, owner_private: bool) -> str:
 # Identity documents injected into the system prompt, in this order, with their tags:
 # core identity (written by the owner), self-image (grown by the being itself), voice examples.
 IDENTITY_DOCS = (("self", "identity"), ("self-image", "self_image"), ("voice", "voice_examples"))
+CHANGING_DOCS = ("self-image",)
+"""Rewritten by the being every day: they go after what stays the same in the system prompt."""
 
 
 def memory_guide(owner_title: str = "主人", diary_hour: int = 4, *, diary: bool = True,
@@ -139,7 +141,7 @@ def memory_block(texts: list[str], max_chars: int = 1200) -> str:
             + "\n".join(lines) + "\n</long_term_memory>")
 
 
-TRANSIENT_TAGS = ("long_term_memory", "now")
+TRANSIENT_TAGS = ("long_term_memory", "now", "abilities_news")
 """Blocks added to the user's message for this reply only: taken out of the earlier messages in the history."""
 
 

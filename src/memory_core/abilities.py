@@ -98,17 +98,21 @@ def lost_note(a: Ability) -> str:
     return f"我发现自己不能再{a.name}了"
 
 
-def abilities_block(current: Iterable[Ability], noticed: Noticed | None = None, owner: str = "主人") -> str:
-    """The list for the prompt. Empty when there is nothing to list."""
+def abilities_block(current: Iterable[Ability], noticed: Noticed | None = None, owner: str = "主人", *,
+                    marks: bool = True) -> str:
+    """The list for the prompt. Empty when there is nothing to list.
+
+    With `marks`, what is new or just lost is marked in the list. Without, the list only changes when an ability
+    comes or goes (it can stay in a cached system prompt), and `abilities_news` says what is new."""
     current = list(current)
     if not current:
         return ""
-    fresh = noticed.fresh if noticed else set()
+    fresh = noticed.fresh if (noticed and marks) else set()
     lines = ["<what_you_can_do>",
              "这是按你现在真正装着、开着的本事列的，会随着装上或拿掉而变："]
     for a in current:
         lines.append(f"- {a.name}{'（刚有的，你才发现）' if a.key in fresh else ''}：{a.text}")
-    for a in (noticed.gone if noticed else []):
+    for a in (noticed.gone if (noticed and marks) else []):
         lines.append(f"- 刚发现不能再{a.name}了：别再答应这件事")
     lines.append(f"- 上面没列的，就是你现在还不会的。做不到的事别答应，也别说成做过；可以老实说还不会，"
                  f"想学就告诉{owner}")
@@ -118,3 +122,23 @@ def abilities_block(current: Iterable[Ability], noticed: Noticed | None = None, 
         lines.append(f"- 刚有的本事，想说就自然地跟{owner}提一句、试一试，不用每次都说")
     lines.append("</what_you_can_do>")
     return "\n".join(lines)
+
+
+NEWS_TAG = "abilities_news"
+
+
+def abilities_news(current: Iterable[Ability], noticed: Noticed | None, owner: str = "主人") -> str:
+    """What is new or just lost, for the message of this reply (the list itself stays in the system prompt).
+    Empty when nothing changed within the fresh window."""
+    if not noticed:
+        return ""
+    names = {a.key: a.name for a in current}
+    new = [names[k] for k in names if k in noticed.fresh]
+    lines = []
+    if new:
+        lines.append(f"- 刚有的本事（你才发现）：{'、'.join(new)}。想说就自然地跟{owner}提一句、试一试，不用每次都说")
+    for a in noticed.gone:
+        lines.append(f"- 刚发现不能再{a.name}了：别再答应这件事")
+    if not lines:
+        return ""
+    return f"<{NEWS_TAG}>\n" + "\n".join(lines) + f"\n</{NEWS_TAG}>"

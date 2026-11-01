@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Prompt caching (AstrBot adapter): the system prompt is laid out by how often each part changes, so the provider
+  caches the longest start: identity, voice examples and the memory guide first, then what other plugins put
+  there, then the self-image (rewritten daily) and the abilities list, then who is speaking. The abilities list no
+  longer marks what is new or just lost (`abilities_block(..., marks=False)`), so it only changes when an ability
+  comes or goes, not again when the mark runs out; what is new goes with the user's message in
+  `<abilities_news>` (`abilities_news()`), taken out of the history like `<now>`.
+
 ## 0.5.0 (2026-10-31)
 
 - `memory_core.now.owner_messages` is public (it was `_owner_messages`): the times the owner said something,
