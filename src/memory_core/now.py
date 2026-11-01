@@ -287,6 +287,7 @@ class Now:
     age_days: int | None
     schedule: Schedule | None = None
     asleep: bool = False
+    talk_start: datetime | None = None  # while they are talking: the owner's first message of this talk
 
 
 def snapshot(core, *, owner_spaces, now: datetime | None = None, day_boundary_hour: int = 4,
@@ -335,7 +336,8 @@ def snapshot(core, *, owner_spaces, now: datetime | None = None, day_boundary_ho
     return Now(local=local, energy=min(awake_energy, 0.15) if asleep else awake_energy, mood_value=value,
                mood_fresh=fresh, mood=mood,
                longing=miss,
-               last_owner=previous, talking_now=talking_now, visits_today=visits,
+               last_owner=previous, talking_now=talking_now, talk_start=talk_start if talking_now else None,
+               visits_today=visits,
                outings_today=_outings_today(core, start),
                diary_line=diary_line, age_days=(day - current_day(birth, day_boundary_hour)).days + 1 if birth else None,
                schedule=sched, asleep=asleep)
@@ -354,6 +356,11 @@ def _longing_words(x: float) -> str:
     return "刚聊过没多久" if x < 0.15 else "有一点想" if x < 0.45 else "挺想" if x < 0.75 else "很想"
 
 
+JUST_CAME_MINUTES = 5
+"""For this long after the owner came back, the note says how long they were away; after that, that they are
+talking (otherwise "you were away a long time" would come with every reply of a long talk)."""
+
+
 def describe(state: Now, *, owner_present: bool, owner_title: str = "主人", now: datetime | None = None) -> str:
     """A short note: the time sense and inner state, in words (never numbers)."""
     lines = ["<now>"]
@@ -369,7 +376,11 @@ def describe(state: Now, *, owner_present: bool, owner_title: str = "主人", no
         lines.append(f"- 心情：{_mood_words(state.mood_value)}")
     if owner_present:
         now = now or timeutil.now()
-        if state.last_owner is not None:
+        talking_for = (now - state.talk_start) if state.talking_now and state.talk_start else None
+        if talking_for is not None and talking_for > timedelta(minutes=JUST_CAME_MINUTES):
+            # well into the talk: the absence before it was said at its start, not again with every reply
+            lines.append(f"- 你们正聊着，这次是 {state.talk_start.astimezone():%H:%M} 开始的")
+        elif state.last_owner is not None:
             gap = now - state.last_owner
             if not state.talking_now:
                 lines.append(f"- {owner_title}上次来是{ago(gap, state.last_owner)}")

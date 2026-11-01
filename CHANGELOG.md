@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Fix: during a long talk the inner-state note kept saying the owner "was away a long time" with every reply (the
+  absence before the talk). Now that is said only in the first minutes after the owner comes back
+  (`JUST_CAME_MINUTES`, 5); after that the note says they are talking and since when (`Now.talk_start`).
+
 ## 0.6.0 (2026-11-01)
 
 - On PyPI as **`memory-core-lib`** (`pip install memory-core-lib`; the package is still `import memory_core`).

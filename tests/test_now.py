@@ -49,6 +49,23 @@ def test_snapshot_after_an_absence(core):
     assert later.longing <= s.longing
 
 
+def test_a_long_talk_does_not_keep_saying_he_was_away(core):
+    """He came back after a night and they talked; 20 minutes in, it is "you are talking", not "away so long"."""
+    _say(core, "晚安", NOW - timedelta(hours=12))
+    start = NOW - timedelta(minutes=23)
+    for k in (0, 3, 4):
+        _say(core, "早上好" if k == 0 else "再来一张", start + timedelta(minutes=k))
+    _say(core, "我在想", NOW - timedelta(seconds=10))  # 19 minutes later, the same talk (less than 30 apart)
+    s = snapshot(core, owner_spaces=[DM], now=NOW)
+    assert s.talking_now and s.talk_start == start
+    note = describe(s, owner_present=True, owner_title="老板", now=NOW)
+    assert "隔了好久" not in note and f"你们正聊着，这次是 {start.astimezone():%H:%M} 开始的" in note
+    first = describe(snapshot(core, owner_spaces=[DM], now=start + timedelta(seconds=30)), owner_present=True,
+                     owner_title="老板", now=start + timedelta(seconds=30))
+    assert "老板隔了好久才来找你" in first  # when he had just come back, it still says so
+    assert snapshot(core, owner_spaces=[DM], now=NOW + timedelta(hours=1)).talk_start is None  # not talking
+
+
 def test_owner_messages(core):
     _say(core, "早", NOW - timedelta(days=2))
     _say(core, "在吗", NOW - timedelta(hours=1))
