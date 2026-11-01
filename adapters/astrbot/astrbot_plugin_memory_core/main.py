@@ -140,6 +140,36 @@ class MemoryCorePlugin(star.Star):
         if self.core:
             await asyncio.to_thread(self.core.close)
 
+    # ---------------------------------------------------------------- for other plugins
+    # Other plugins (thinking-of-you, surfing-the-web, rice-bowl) find this plugin with
+    # context.get_registered_star("astrbot_plugin_memory_core").star_cls and use only what is below, plus the
+    # attributes `core` (the MemoryCore), `owner_ids` and `owner_title`. The rest may change between versions.
+
+    def where(self, event: AstrMessageEvent) -> tuple[str, bool, bool]:
+        """(memory space of this chat, is it a group, is it the owner's private chat)."""
+        return self._where(event)
+
+    def owner_spaces(self) -> list[str]:
+        """The memory spaces of the owner's private chats."""
+        return self._owner_spaces()
+
+    def snapshot(self):
+        """The being's inner state now (`memory_core.now.Now`): longing, energy, mood, asleep..."""
+        return self._snapshot()
+
+    def provider_id(self) -> str | None:
+        """The chat model this plugin uses for its own work (consolidation, diary), if any."""
+        return self._provider_id()
+
+    def persona(self, *names: str) -> str:
+        """Identity documents as prompt blocks, e.g. persona("self", "self-image", "voice")."""
+        return self._persona(*names)
+
+    def owner_console(self, event: AstrMessageEvent) -> bool:
+        """Whether this message may use owner-only commands (the owner, in a private chat, on a platform in
+        owner_command_platforms). When not, the event is stopped and nothing is replied."""
+        return not self._console_denied(event)
+
     # ---------------------------------------------------------------- helpers
 
     def _where(self, event: AstrMessageEvent) -> tuple[str, bool, bool]:
