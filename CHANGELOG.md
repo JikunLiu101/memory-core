@@ -1,8 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 (2026-11-01)
 
-- Prompt caching (AstrBot adapter): the system prompt is laid out by how often each part changes, so the provider
+- On PyPI as **`memory-core-lib`** (`pip install memory-core-lib`; the package is still `import memory_core`).
+  The name `memory-core` is too close to an existing project there.
+- The AstrBot adapter moved to its own repository,
+  [astrbot_plugin_memory_core](https://github.com/JikunLiu101/astrbot_plugin_memory_core) (with its history), so
+  AstrBot's plugin market can install it; its tests moved with it.
+- `abilities_block(..., marks=False)` and `abilities_news()`: the list without what is new, and what is new as a
+  block of its own.
+- Prompt caching (AstrBot plugin): the system prompt is laid out by how often each part changes, so the provider
   caches the longest start: identity, voice examples and the memory guide first, then what other plugins put
   there, then the self-image (rewritten daily) and the abilities list, then who is speaking. The abilities list no
   longer marks what is new or just lost (`abilities_block(..., marks=False)`), so it only changes when an ability

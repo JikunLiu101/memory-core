@@ -46,7 +46,7 @@ memory-core is built on a few rules:
 ## Quick start
 
 ```bash
-pip install -e ".[zh]"          # zh = jieba for better Chinese full-text search (optional)
+pip install "memory-core-lib[zh]"  # zh = jieba for better Chinese full-text search (optional); import memory_core
 memory-core init ./soul
 memory-core record ./soul --space web --source browser --kind observation --content "Watched a video about Genshin"
 memory-core remember ./soul --scope public --kind fact --text "Genshin Impact is an open-world game"
@@ -164,7 +164,7 @@ what is visible there.
 
 ## Adapters
 
-* **AstrBot** — [`adapters/astrbot`](adapters/astrbot/README.md): records every visible message and the bot's own
+* **AstrBot** — [astrbot_plugin_memory_core](https://github.com/JikunLiu101/astrbot_plugin_memory_core) (its own repository since 0.6.0, in AstrBot's plugin market as 记忆核心): records every visible message and the bot's own
   answers, uses the identity documents as the persona, injects recalled memories before each reply,
   consolidates periodically with AstrBot's own chat model, writes the daily diary and self-image, runs the daily
   memory metabolism, gives the model `memory_recall` / `memory_remember` / `identity_propose` tools, and the owner

@@ -1,6 +1,0 @@
-name: astrbot_plugin_memory_core
-display_name: memory-core
-desc: Local-first long-term memory for AstrBot, backed by memory-core (raw experiences as the source of truth, vectors as a rebuildable index, visibility scopes per chat).
-author: JikunLiu101
-version: 0.5.0
-repo: https://github.com/JikunLiu101/memory-core
